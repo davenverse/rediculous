@@ -1,0 +1,11 @@
+target/
+.idea/
+# vim
+*.sw?
+
+# Ignore [ce]tags files
+tags
+
+.bloop
+.metals
+project/metals.sbt
