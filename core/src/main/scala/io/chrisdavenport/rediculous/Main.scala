@@ -21,20 +21,23 @@ object Main extends IOApp {
     val r = for {
       blocker <- Blocker[IO]
       sg <- SocketGroup[IO](blocker)
-      connection <- Connection.queued[IO](sg, new InetSocketAddress("localhost", 6379), workers = 4)
+      connection <- Connection.queued[IO](sg, new InetSocketAddress("localhost", 6379), maxQueued = 20000, workers = 4)
     } yield connection
 
     r.use {client =>
-        val r = (
-          Protocol.ping[IO],
-          Protocol.get[IO]("foo"),
-          Protocol.set[IO]("foo", "value"),
-          Protocol.get[IO]("foo")
-        ).parTupled
+        // val r = (
+        //   Protocol.ping[IO],
+        //   Protocol.get[IO]("foo"),
+        //   Protocol.set[IO]("foo", "value"),
+        //   Protocol.get[IO]("foo")
+        // ).parTupled
+
+      val r2 = List.fill(1000)(Protocol.ping[IO]).parSequence
+
 
         // a.run(client).flatTap(a => IO(println(a)))
       // val r = List.fill(100)(Protocol.ping[IO]).parSequence
-      Stream(Stream.eval(r.run(client)).repeat).parJoin(50).take(1000000).compile.drain
+      Stream(()).covary[IO].repeat.map(_ => Stream.eval(r2.run(client)).flatMap(s => Stream.emits(s))).parJoin(15).take(1000000).compile.drain
       // (r.run(client).flatMap(a => IO(println(a)))
       // ,r.run(client).flatMap(a => IO(println(a)))
       // ).parMapN{ case (_, _) => ()}

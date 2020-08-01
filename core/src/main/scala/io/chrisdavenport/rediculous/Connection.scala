@@ -16,7 +16,7 @@ import scala.concurrent.duration._
 
 sealed trait Connection[F[_]]
 object Connection{
-  private case class Queued[F[_]](queue: Queue[F, (Deferred[F, Resp], Resp)]) extends Connection[F]
+  private case class Queued[F[_]](queue: Queue[F, (Deferred[F, Either[Throwable, Resp]], Resp)]) extends Connection[F]
   private case class PooledConnection[F[_]](
     pool: KeyPool[F, Unit, (Socket[F], F[Unit])]
   ) extends Connection[F]
@@ -39,13 +39,16 @@ object Connection{
           
         }
     }
-    val arrayB = new scala.collection.mutable.ArrayBuffer[Byte]
-      calls.toList.foreach{
-        case resp => 
-          arrayB.addAll(Resp.encode(resp))
-      }
-    socket.write(Chunk.bytes(arrayB.toArray)) >>
-    getTillEqualSize(List.empty, Array.emptyByteArray)
+    if (calls.nonEmpty){
+      val arrayB = new scala.collection.mutable.ArrayBuffer[Byte]
+        calls.toList.foreach{
+          case resp => 
+            arrayB.addAll(Resp.encode(resp))
+        }
+      println(s"Sending Request for ${calls.size}")
+      socket.write(Chunk.bytes(arrayB.toArray)) >>
+      getTillEqualSize(List.empty, Array.emptyByteArray)
+    } else Applicative[F].pure(List.empty)
   }
 
   // Can Be used to implement any low level protocols.
@@ -54,14 +57,14 @@ object Connection{
     connection match {
       case PooledConnection(pool) => pool.map(_._1).take(()).evalMap{
         m => withSocket(m.value).attempt.flatTap{
-          case Left(e) => m.canBeReused.set(Reusable.DontReuse)
+          case Left(e) => Sync[F].delay(println(s"Got Error: $e")) >> m.canBeReused.set(Reusable.DontReuse)
           case _ => Applicative[F].unit
         }.rethrow.map(RedisResult[A].decode)
       }.map(_.pure[F])
       case DirectConnection(socket) => Resource.liftF(withSocket(socket).map(RedisResult[A].decode)).map(_.pure[F])
-      case Queued(queue) => Resource.liftF(Deferred[F, Resp]).flatMap{d => 
+      case Queued(queue) => Resource.liftF(Deferred[F, Either[Throwable, Resp]]).flatMap{d => 
         Resource.liftF(queue.enqueue1((d, resp))) >> {
-          Resource.pure[F, F[Either[Resp, A]]](d.get.map(RedisResult[A].decode))
+          Resource.pure[F, F[Either[Resp, A]]](d.get.rethrow.map(RedisResult[A].decode))
         }     
       }
     }
@@ -79,7 +82,7 @@ object Connection{
   // Only allows 1k queued actions, before new actions block to be accepted.
   def queued[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, address: InetSocketAddress, maxQueued: Int = 1000, workers: Int = 2): Resource[F, Connection[F]] = 
     for {
-      queue <- Resource.liftF(Queue.bounded[F, (Deferred[F, Resp], Resp)](maxQueued))
+      queue <- Resource.liftF(Queue.bounded[F, (Deferred[F, Either[Throwable,Resp]], Resp)](maxQueued))
       keypool <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
         {_ => sg.client[F](address).allocated.flatTap(a => Sync[F].delay(println(s"Created Redis Connection to $address")))},
         { case (_, shutdown) => Sync[F].delay(println("Shutting down redis connection")) >> shutdown}
@@ -93,14 +96,17 @@ object Connection{
                   explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
                     case Left(e) => m.canBeReused.set(Reusable.DontReuse)
                     case _ => Applicative[F].unit
-                  }.rethrow
+                  }
                 }.flatMap{
-                    n => n.zipWithIndex.traverse_{
+                  case Right(n) => 
+                    n.zipWithIndex.traverse_{
                       case (ref, i) => 
                         val (toSet, _) = chunk(i)
-                        toSet.complete(ref)
+                        toSet.complete(Either.right(ref))
                     }
-                })
+                  case e@Left(_) => 
+                    chunk.traverse_{ case (deff, _) => deff.complete(e.asInstanceOf[Either[Throwable, Resp]])}
+                }) ++ Stream.eval_(ContextShift[F].shift)
             } else {
               Stream.empty
             }

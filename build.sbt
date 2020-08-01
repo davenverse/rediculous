@@ -22,7 +22,8 @@ lazy val `rediculous` = project.in(file("."))
 lazy val core = project.in(file("core"))
   .settings(commonSettings)
   .settings(
-    name := "rediculous"
+    name := "rediculous",
+    fork in run := true
   )
 
 lazy val site = project.in(file("site"))

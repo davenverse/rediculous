@@ -78,7 +78,7 @@ object Resp {
         while (idx < arr.size && arr(idx) != CR){
           idx += 1
         }
-        if (idx < arr.size && (idx +1 <= arr.size) && arr(idx +1) == LF){
+        if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
           val out = new  String(arr, 1, idx - 1)
           ParseComplete(SimpleString(out), arr.drop(idx + 2))
         } else {
@@ -102,7 +102,7 @@ object Resp {
         while (idx < arr.size && arr(idx) != CR){
           idx += 1
         }
-        if (idx < arr.size && (idx +1 <= arr.size) && arr(idx +1) == LF){
+        if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
           val out = new  String(arr, 1, idx - 1)
           ParseComplete(Error(out), arr.drop(idx + 2))
         } else {
@@ -127,7 +127,7 @@ object Resp {
         while (idx < arr.size && arr(idx) != CR){
           idx += 1
         }
-        if (idx < arr.size && (idx +1 <= arr.size) && arr(idx +1) == LF){
+        if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
           val out = new  String(arr, 1, idx - 1).toLong
           ParseComplete(Integer(out), arr.drop(idx + 2))
         } else {
@@ -157,7 +157,7 @@ object Resp {
         while (idx < arr.size && arr(idx) != CR){
           idx += 1
         }
-        if (idx < arr.size && (idx +1 <= arr.size) && arr(idx +1) == LF){
+        if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
           val out = new  String(arr, 1, idx - 1).toInt 
           length = out
           idx += 2
