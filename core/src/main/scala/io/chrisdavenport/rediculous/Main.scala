@@ -21,16 +21,14 @@ object Main extends IOApp {
     val r = for {
       blocker <- Blocker[IO]
       sg <- SocketGroup[IO](blocker)
-      // client <- sg.client[IO](new InetSocketAddress("localhost", 6379))
       connection <- Connection.queued[IO](sg, new InetSocketAddress("localhost", 6379))
     } yield connection
 
     r.use {client =>
-      // val bytes = Resp.encode(
-      
-      // )
-    
-      List.fill(100)(Protocol.ping[IO]).sequence.run(client).use{ia => ia.sequence.flatMap(a => IO(println(a)))}
+      val r = List.fill(20)(Protocol.ping[IO]).parSequence
+      (r.run(client).flatMap(a => IO(println(a)))
+      ,r.run(client).flatMap(a => IO(println(a)))
+      ).parMapN{ case (_, _) => ()}
     } >>
       IO.pure(ExitCode.Success)
     
@@ -40,6 +38,71 @@ object Main extends IOApp {
 import _root_.io.chrisdavenport.keypool.KeyPool
 
 object Protocol {
+
+  final case class Redis[F[_], A](unRedis: Kleisli[Resource[F, *], Connection[F], F[A]]){
+    def run(connection: Connection[F])(implicit ev: Bracket[F, Throwable]): F[A] = {
+      Redis.runRedis(this)(connection)
+    }
+  }
+  object Redis {
+    def runRedis[F[_]: Bracket[*[_], Throwable], A](redis: Redis[F, A])(connection: Connection[F]): F[A] = {
+      redis.unRedis.run(connection).use{fa => fa}
+    }
+
+
+
+    final case class Par[F[_], A](unRedis: Kleisli[Resource[F, *], Connection[F], F[A]])
+    object Par {
+
+      def parallel[F[_]]: Redis[F, *] ~> Par[F, *] = new ~>[Redis[F, *], Par[F, *]]{
+        def apply[A](fa: Redis[F,A]): Par[F,A] = Par(fa.unRedis)
+      }
+
+      def sequential[F[_]]: Par[F, *] ~> Redis[F, *] = new ~>[Par[F, *], Redis[F, *]]{
+        def apply[A](fa: Par[F,A]): Redis[F,A] = Redis(fa.unRedis)
+      }
+
+      implicit def parApplicative[F[_]: Parallel: Bracket[*[_], Throwable]]: Applicative[Par[F, *]] = new Applicative[Par[F, *]]{
+        def ap[A, B](ff: Par[F,A => B])(fa: Par[F,A]): Par[F,B] = Par(
+          ff.unRedis.flatMap{ ff => 
+            fa.unRedis.map{fa =>  Parallel[F].sequential(
+              Parallel[F].applicative.ap(Parallel[F].parallel(ff))(Parallel[F].parallel(fa))
+            )}
+          }
+        )
+        def pure[A](x: A): Par[F,A] = Par(
+          Kleisli.pure[Resource[F, *], Connection[F], F[A]](x.pure[F])
+        )
+      }
+
+    }
+
+    implicit def monad[F[_]: Monad]: Monad[Redis[F, *]] = new StackSafeMonad[Redis[F, *]]{
+      def flatMap[A, B](fa: Redis[F,A])(f: A => Redis[F,B]): Redis[F,B] = Redis(
+        fa.unRedis.flatMap(fa => 
+          Kleisli.liftF[Resource[F, *], Connection[F], A](Resource.liftF(fa))
+            .flatMap(a => f(a).unRedis)
+        )
+      )
+      def pure[A](x: A): Redis[F, A] = Redis(
+        Kleisli.pure[Resource[F, *], Connection[F], F[A]](x.pure[F])
+      )
+    }
+
+    
+
+    implicit def parRedis[M[_]: Parallel: Bracket[*[_], Throwable]]: Parallel[Redis[M, *]] = new Parallel[Redis[M, *]]{
+      type F[A] = Par[M, A]
+
+      def sequential: Par[M, *] ~> Redis[M, *] = Par.sequential[M]
+      
+      def parallel: Redis[M, *] ~> Par[M, *] = Par.parallel[M]
+      
+      def applicative: Applicative[Par[M, *]] = Par.parApplicative[M] 
+      
+      def monad: Monad[Redis[M,*]] = Redis.monad[M]
+    }
+  }
 
   trait RedisResult[+A]{
     def decode(resp: Resp): Either[Resp, A]
@@ -82,7 +145,7 @@ object Protocol {
       ).build.map(PooledConnection[F](_))
 
 
-    def queued[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, address: InetSocketAddress): Resource[F, Connection[F]] = 
+    def queued[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, address: InetSocketAddress, workers: Int = 4): Resource[F, Connection[F]] = 
       for {
         queue <- Resource.liftF(Queue.bounded[F, (Deferred[F, Resp], Resp)](2000))
         keypool <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
@@ -90,12 +153,14 @@ object Protocol {
           { case (_, shutdown) => Sync[F].delay(println("Shutting down redis connection")) >> shutdown}
         ).build
         _ <- 
-            queue.dequeue.groupWithin(1000, 5.millis).map{chunk => 
+            queue.dequeue.chunks.map{chunk => 
               Stream.resource(
               chunk.toNel match {
                 case Some(value) => 
-                  keypool.map(_._1).take(()).evalMap{
-                    m => explicitPipelineRequest(m.value, value.map(_._2)).attempt.flatTap{
+                  keypool.map(_._1).take(()).evalMap{m =>
+                    val out = value.map(_._2)
+                    Sync[F].delay(println(s"Sending Request for $out")) >>
+                    explicitPipelineRequest(m.value, out).attempt.flatTap{
                       case Left(e) => m.canBeReused.set(DontReuse)
                       case _ => Applicative[F].unit
                     }.rethrow.flatMap{
@@ -110,14 +175,14 @@ object Protocol {
               }
               )
             
-            }.parJoin(2)
+            }.parJoin(workers) // 4 Worker Threads
             .compile
             .drain
             .background
       } yield Queued(queue)
   }
 
-  def ping[F[_]: Concurrent]: Kleisli[Resource[F, *], Connection[F], F[String]] = {
+  def ping[F[_]: Concurrent]: Redis[F, String] = {
     val ping = Resp.Array(
       Some(
         List(
@@ -125,16 +190,18 @@ object Protocol {
         )
       )
     )
-  
-    Kleisli{con: Connection[F] => Connection.run(con)(ping)}.map{_.flatMap{
-      case Right(Resp.SimpleString(x)) => x.pure[F]
-      case Right(Resp.BulkString(Some(x))) => x.pure[F]
-      case Right(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError(e)
-      case s => ApplicativeError[F, Throwable].raiseError(new Throwable("Incompatible Response Type for PING, got $s"))
-    }}
+    Redis(
+      Kleisli{con: Connection[F] => Connection.run(con)(ping)}.map{_.flatMap{
+        case Right(Resp.SimpleString(x)) => x.pure[F]
+        case Right(Resp.BulkString(Some(x))) => x.pure[F]
+        case Right(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError(e)
+        case s => ApplicativeError[F, Throwable].raiseError(new Throwable("Incompatible Response Type for PING, got $s"))
+      }}
+    )
 
   }
 
+  // Guarantees With Socket That Each Call Receives a Response
   def explicitPipelineRequest[F[_]: MonadError[*[_], Throwable]](socket: Socket[F], calls: NonEmptyList[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[NonEmptyList[Resp]] = {
     def getTillEqualSize(acc: List[List[Resp]], lastArr: Array[Byte]): F[NonEmptyList[Resp]] = 
     socket.read(maxBytes, timeout).flatMap{
