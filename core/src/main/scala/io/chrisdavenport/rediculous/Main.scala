@@ -32,12 +32,12 @@ object Main extends IOApp {
         //   Protocol.get[IO]("foo")
         // ).parTupled
 
-      val r2 = List.fill(1000)(Protocol.ping[IO]).parSequence
+      val r2 = List.fill(1000)(Protocol.ping[IO].run(client)).parSequence
 
 
         // a.run(client).flatTap(a => IO(println(a)))
       // val r = List.fill(100)(Protocol.ping[IO]).parSequence
-      Stream(()).covary[IO].repeat.map(_ => Stream.eval(r2.run(client)).flatMap(s => Stream.emits(s))).parJoin(15).take(1000000).compile.drain
+      Stream(()).covary[IO].repeat.map(_ => Stream.eval(r2).flatMap(s => Stream.emits(s))).parJoin(15).take(1000000).compile.drain
       // (r.run(client).flatMap(a => IO(println(a)))
       // ,r.run(client).flatMap(a => IO(println(a)))
       // ).parMapN{ case (_, _) => ()}
