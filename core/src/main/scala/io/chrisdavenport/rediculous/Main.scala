@@ -45,34 +45,58 @@ object Protocol {
     }
   }
   object Redis {
-    def runRedis[F[_]: Bracket[*[_], Throwable], A](redis: Redis[F, A])(connection: Connection[F]): F[A] = {
+
+    private def runRedis[F[_]: Bracket[*[_], Throwable], A](redis: Redis[F, A])(connection: Connection[F]): F[A] = {
       redis.unRedis.run(connection).use{fa => fa}
     }
 
+    /**
+     * Newtype encoding for a `Redis` datatype that has a `cats.Applicative`
+     * capable of doing parallel processing in `ap` and `map2`, needed
+     * for implementing `cats.Parallel`.
+     *
+     * Helpers are provided for converting back and forth in `Par.apply`
+     * for wrapping any `Redis` value and `Par.unwrap` for unwrapping.
+     *
+     * The encoding is based on the "newtypes" project by
+     * Alexander Konovalov, chosen because it's devoid of boxing issues and
+     * a good choice until opaque types will land in Scala.
+     * [[https://github.com/alexknvl/newtypes alexknvl/newtypes]].
+     *
+     */
+    type Par[+F[_], +A] = Par.Type[F, A]
 
-
-    final case class Par[F[_], A](unRedis: Kleisli[Resource[F, *], Connection[F], F[A]])
     object Par {
 
+      type Base
+      trait Tag extends Any
+      type Type[+F[_], +A] <: Base with Tag
+
+      def apply[F[_], A](fa: Redis[F, A]): Type[F, A] =
+        fa.asInstanceOf[Type[F, A]]
+
+      def unwrap[F[_], A](fa: Type[F, A]): Redis[F, A] =
+        fa.asInstanceOf[Redis[F, A]]
+
       def parallel[F[_]]: Redis[F, *] ~> Par[F, *] = new ~>[Redis[F, *], Par[F, *]]{
-        def apply[A](fa: Redis[F,A]): Par[F,A] = Par(fa.unRedis)
+        def apply[A](fa: Redis[F,A]): Par[F,A] = Par(fa)
       }
 
       def sequential[F[_]]: Par[F, *] ~> Redis[F, *] = new ~>[Par[F, *], Redis[F, *]]{
-        def apply[A](fa: Par[F,A]): Redis[F,A] = Redis(fa.unRedis)
+        def apply[A](fa: Par[F,A]): Redis[F,A] = unwrap(fa)
       }
 
       implicit def parApplicative[F[_]: Parallel: Bracket[*[_], Throwable]]: Applicative[Par[F, *]] = new Applicative[Par[F, *]]{
-        def ap[A, B](ff: Par[F,A => B])(fa: Par[F,A]): Par[F,B] = Par(
-          ff.unRedis.flatMap{ ff => 
-            fa.unRedis.map{fa =>  Parallel[F].sequential(
+        def ap[A, B](ff: Par[F,A => B])(fa: Par[F,A]): Par[F,B] = Par(Redis(
+          Par.unwrap(ff).unRedis.flatMap{ ff => 
+            Par.unwrap(fa).unRedis.map{fa =>  Parallel[F].sequential(
               Parallel[F].applicative.ap(Parallel[F].parallel(ff))(Parallel[F].parallel(fa))
             )}
           }
-        )
-        def pure[A](x: A): Par[F,A] = Par(
+        ))
+        def pure[A](x: A): Par[F,A] = Par(Redis(
           Kleisli.pure[Resource[F, *], Connection[F], F[A]](x.pure[F])
-        )
+        ))
       }
 
     }
@@ -91,7 +115,7 @@ object Protocol {
 
     
 
-    implicit def parRedis[M[_]: Parallel: Bracket[*[_], Throwable]]: Parallel[Redis[M, *]] = new Parallel[Redis[M, *]]{
+    implicit def parRedis[M[_]: Parallel: Concurrent]: Parallel[Redis[M, *]] = new Parallel[Redis[M, *]]{
       type F[A] = Par[M, A]
 
       def sequential: Par[M, *] ~> Redis[M, *] = Par.sequential[M]
