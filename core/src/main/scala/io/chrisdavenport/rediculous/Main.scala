@@ -25,7 +25,7 @@ object Main extends IOApp {
     } yield connection
 
     r.use {client =>
-      val r = List.fill(20)(Protocol.ping[IO]).parSequence
+      val r = List.fill(25)(Protocol.ping[IO]).parSequence
       (r.run(client).flatMap(a => IO(println(a)))
       ,r.run(client).flatMap(a => IO(println(a)))
       ).parMapN{ case (_, _) => ()}
@@ -49,6 +49,12 @@ object Protocol {
     private def runRedis[F[_]: Bracket[*[_], Throwable], A](redis: Redis[F, A])(connection: Connection[F]): F[A] = {
       redis.unRedis.run(connection).use{fa => fa}
     }
+
+    def liftF[F[_]: Monad, A](fa: F[A]): Redis[F, A] = 
+      Redis(Kleisli.liftF[Resource[F, *], Connection[F], A](Resource.liftF(fa)).map(_.pure[F]))
+    def liftFBackground[F[_]: Concurrent, A](fa: F[A]): Redis[F, A] = Redis(
+      Kleisli.liftF(fa.background)
+    )
 
     /**
      * Newtype encoding for a `Redis` datatype that has a `cats.Applicative`
@@ -169,9 +175,9 @@ object Protocol {
       ).build.map(PooledConnection[F](_))
 
 
-    def queued[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, address: InetSocketAddress, workers: Int = 4): Resource[F, Connection[F]] = 
+    def queued[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, address: InetSocketAddress, maxQueued: Int = 1000, workers: Int = 2): Resource[F, Connection[F]] = 
       for {
-        queue <- Resource.liftF(Queue.bounded[F, (Deferred[F, Resp], Resp)](2000))
+        queue <- Resource.liftF(Queue.bounded[F, (Deferred[F, Resp], Resp)](maxQueued))
         keypool <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
           {_ => sg.client[F](address).allocated.flatTap(a => Sync[F].delay(println(s"Created Redis Connection to $address")))},
           { case (_, shutdown) => Sync[F].delay(println("Shutting down redis connection")) >> shutdown}
@@ -184,7 +190,7 @@ object Protocol {
                   keypool.map(_._1).take(()).evalMap{m =>
                     val out = value.map(_._2)
                     Sync[F].delay(println(s"Sending Request for $out")) >>
-                    explicitPipelineRequest(m.value, out).attempt.flatTap{
+                    explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
                       case Left(e) => m.canBeReused.set(DontReuse)
                       case _ => Applicative[F].unit
                     }.rethrow.flatMap{
@@ -199,12 +205,13 @@ object Protocol {
               }
               )
             
-            }.parJoin(workers) // 4 Worker Threads
+            }.parJoin(workers) // Worker Threads
             .compile
             .drain
             .background
       } yield Queued(queue)
   }
+
 
   def ping[F[_]: Concurrent]: Redis[F, String] = {
     val ping = Resp.Array(
