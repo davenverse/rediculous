@@ -25,10 +25,18 @@ object Main extends IOApp {
     } yield connection
 
     r.use {client =>
-      val r = List.fill(25)(Protocol.ping[IO]).parSequence
-      (r.run(client).flatMap(a => IO(println(a)))
-      ,r.run(client).flatMap(a => IO(println(a)))
-      ).parMapN{ case (_, _) => ()}
+        val a = (
+          Protocol.ping[IO],
+          Protocol.get[IO]("foo"),
+          Protocol.set[IO]("foo", "value"),
+          Protocol.get[IO]("foo")
+        ).parTupled
+
+        a.run(client).flatTap(a => IO(println(a)))
+      // val r = List.fill(25)(Protocol.ping[IO]).parSequence
+      // (r.run(client).flatMap(a => IO(println(a)))
+      // ,r.run(client).flatMap(a => IO(println(a)))
+      // ).parMapN{ case (_, _) => ()}
     } >>
       IO.pure(ExitCode.Success)
     
@@ -87,7 +95,6 @@ object Protocol {
       def parallel[F[_]]: Redis[F, *] ~> Par[F, *] = new ~>[Redis[F, *], Par[F, *]]{
         def apply[A](fa: Redis[F,A]): Par[F,A] = Par(fa)
       }
-
       def sequential[F[_]]: Par[F, *] ~> Redis[F, *] = new ~>[Par[F, *], Redis[F, *]]{
         def apply[A](fa: Par[F,A]): Redis[F,A] = unwrap(fa)
       }
@@ -229,8 +236,49 @@ object Protocol {
         case s => ApplicativeError[F, Throwable].raiseError(new Throwable("Incompatible Response Type for PING, got $s"))
       }}
     )
-
   }
+
+  def get[F[_]: Concurrent](key: String): Redis[F, Option[String]] = {
+    val ping = Resp.Array(
+      Some(
+        List(
+          Resp.BulkString(Some("GET")),
+          Resp.BulkString(Some(key))
+        )
+      )
+    )
+    Redis(
+      Kleisli{con: Connection[F] => Connection.run(con)(ping)}.map{_.flatMap{
+        case Right(Resp.SimpleString(x)) => x.some.pure[F]
+        case Right(Resp.BulkString(Some(x))) => x.some.pure[F]
+        case Right(Resp.BulkString(None)) => None.pure[F].widen
+        case Right(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError(e)
+        case s => ApplicativeError[F, Throwable].raiseError(new Throwable("Incompatible Response Type for PING, got $s"))
+      }}
+    )
+  }
+
+  def set[F[_]: Concurrent](key: String, value: String): Redis[F, Option[String]] = {
+    val ping = Resp.Array(
+      Some(
+        List(
+          Resp.BulkString(Some("SET")),
+          Resp.BulkString(Some(key)),
+          Resp.BulkString(Some(value))
+        )
+      )
+    )
+    Redis(
+      Kleisli{con: Connection[F] => Connection.run(con)(ping)}.map{_.flatMap{
+        case Right(Resp.SimpleString(x)) => x.some.pure[F]
+        case Right(Resp.BulkString(Some(x))) => x.some.pure[F]
+        case Right(Resp.BulkString(None)) => None.pure[F].widen
+        case Right(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError(e)
+        case s => ApplicativeError[F, Throwable].raiseError(new Throwable("Incompatible Response Type for PING, got $s"))
+      }}
+    )
+  }
+
 
   // Guarantees With Socket That Each Call Receives a Response
   def explicitPipelineRequest[F[_]: MonadError[*[_], Throwable]](socket: Socket[F], calls: NonEmptyList[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[NonEmptyList[Resp]] = {
