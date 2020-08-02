@@ -20,7 +20,10 @@
 <span class="k">import</span> <span class="nn">fs2._</span>
 <span class="k">import</span> <span class="nn">scala.concurrent.duration._</span>
 
-<span class="k">object</span> <span class="nc">SimpleExample</span> <span class="k">extends</span> <span class="nc">IOApp</span> <span class="o">{</span>
+<span class="c1">// Mimics 150 req/s load with 4 operations per request.</span>
+<span class="c1">// Completes 1,000,000 redis operations</span>
+<span class="c1">// Completes in &lt;5 s</span>
+<span class="k">object</span> <span class="nc">BasicExample</span> <span class="k">extends</span> <span class="nc">IOApp</span> <span class="o">{</span>
 
   <span class="k">def</span> <span class="nf">run</span><span class="o">(</span><span class="n">args</span><span class="k">:</span> <span class="kt">List</span><span class="o">[</span><span class="kt">String</span><span class="o">])</span><span class="k">:</span> <span class="kt">IO</span><span class="o">[</span><span class="kt">ExitCode</span><span class="o">]</span> <span class="k">=</span> <span class="o">{</span>
     <span class="k">val</span> <span class="nv">r</span> <span class="k">=</span> <span class="k">for</span> <span class="o">{</span>
@@ -29,7 +32,7 @@
       <span class="c1">// maxQueued: How many elements before new submissions semantically block. Tradeoff of memory to queue jobs. </span>
       <span class="c1">// Default 1000 is good for small servers. But can easily take 100,000.</span>
       <span class="c1">// workers: How many threads will process pipelined messages.</span>
-      <span class="n">connection</span> <span class="k">&lt;-</span> <span class="nv">RedisConnection</span><span class="o">.</span><span class="py">queued</span><span class="o">[</span><span class="kt">IO</span><span class="o">](</span><span class="n">sg</span><span class="o">,</span> <span class="k">new</span> <span class="nc">InetSocketAddress</span><span class="o">(</span><span class="s">"localhost"</span><span class="o">,</span> <span class="mi">6379</span><span class="o">),</span> <span class="n">maxQueued</span> <span class="k">=</span> <span class="mi">1000</span><span class="o">,</span> <span class="n">workers</span> <span class="k">=</span> <span class="mi">2</span><span class="o">)</span>
+      <span class="n">connection</span> <span class="k">&lt;-</span> <span class="nv">RedisConnection</span><span class="o">.</span><span class="py">queued</span><span class="o">[</span><span class="kt">IO</span><span class="o">](</span><span class="n">sg</span><span class="o">,</span> <span class="k">new</span> <span class="nc">InetSocketAddress</span><span class="o">(</span><span class="s">"localhost"</span><span class="o">,</span> <span class="mi">6379</span><span class="o">),</span> <span class="n">maxQueued</span> <span class="k">=</span> <span class="mi">10000</span><span class="o">,</span> <span class="n">workers</span> <span class="k">=</span> <span class="mi">2</span><span class="o">)</span>
     <span class="o">}</span> <span class="k">yield</span> <span class="n">connection</span>
 
     <span class="nv">r</span><span class="o">.</span><span class="py">use</span> <span class="o">{</span><span class="n">client</span> <span class="k">=&gt;</span>
@@ -40,12 +43,14 @@
         <span class="nv">RedisCommands</span><span class="o">.</span><span class="py">get</span><span class="o">[</span><span class="kt">IO</span><span class="o">](</span><span class="s">"foo"</span><span class="o">)</span>
       <span class="o">).</span><span class="py">parTupled</span>
 
-      <span class="k">val</span> <span class="nv">r2</span> <span class="k">=</span> <span class="nv">List</span><span class="o">.</span><span class="py">fill</span><span class="o">(</span><span class="mi">1000</span><span class="o">)(</span><span class="n">r</span><span class="o">).</span><span class="py">parSequence</span>
+      <span class="k">val</span> <span class="nv">r2</span><span class="k">=</span> <span class="nv">List</span><span class="o">.</span><span class="py">fill</span><span class="o">(</span><span class="mi">10</span><span class="o">)(</span><span class="nv">r</span><span class="o">.</span><span class="py">run</span><span class="o">(</span><span class="n">client</span><span class="o">)).</span><span class="py">parSequence</span><span class="o">.</span><span class="py">map</span><span class="o">{</span><span class="nv">_</span><span class="o">.</span><span class="py">flatMap</span><span class="o">{</span>
+        <span class="nf">case</span> <span class="o">(</span><span class="k">_</span><span class="o">,</span><span class="k">_</span><span class="o">,</span><span class="k">_</span><span class="o">,</span><span class="k">_</span><span class="o">)</span> <span class="k">=&gt;</span> <span class="nc">List</span><span class="o">((),</span> <span class="o">(),</span> <span class="o">(),</span> <span class="o">())</span>
+      <span class="o">}}</span>
 
       <span class="k">val</span> <span class="nv">now</span> <span class="k">=</span> <span class="nc">IO</span><span class="o">(</span><span class="nv">java</span><span class="o">.</span><span class="py">time</span><span class="o">.</span><span class="py">Instant</span><span class="o">.</span><span class="py">now</span><span class="o">)</span>
       <span class="o">(</span>
         <span class="n">now</span><span class="o">,</span>
-        <span class="nc">Stream</span><span class="o">(()).</span><span class="py">covary</span><span class="o">[</span><span class="kt">IO</span><span class="o">].</span><span class="py">repeat</span><span class="o">.</span><span class="py">map</span><span class="o">(</span><span class="k">_</span> <span class="k">=&gt;</span> <span class="nv">Stream</span><span class="o">.</span><span class="py">evalSeq</span><span class="o">(</span><span class="nv">r2</span><span class="o">.</span><span class="py">run</span><span class="o">(</span><span class="n">client</span><span class="o">))).</span><span class="py">parJoin</span><span class="o">(</span><span class="mi">10</span><span class="o">).</span><span class="py">take</span><span class="o">(</span><span class="mi">10000</span><span class="o">).</span><span class="py">compile</span><span class="o">.</span><span class="py">drain</span><span class="o">,</span>
+        <span class="nc">Stream</span><span class="o">(()).</span><span class="py">covary</span><span class="o">[</span><span class="kt">IO</span><span class="o">].</span><span class="py">repeat</span><span class="o">.</span><span class="py">map</span><span class="o">(</span><span class="k">_</span> <span class="k">=&gt;</span> <span class="nv">Stream</span><span class="o">.</span><span class="py">evalSeq</span><span class="o">(</span><span class="n">r2</span><span class="o">)).</span><span class="py">parJoin</span><span class="o">(</span><span class="mi">15</span><span class="o">).</span><span class="py">take</span><span class="o">(</span><span class="mi">1000000</span><span class="o">).</span><span class="py">compile</span><span class="o">.</span><span class="py">drain</span><span class="o">,</span>
         <span class="n">now</span>
       <span class="o">).</span><span class="py">mapN</span><span class="o">{</span>
         <span class="nf">case</span> <span class="o">(</span><span class="n">before</span><span class="o">,</span> <span class="k">_</span><span class="o">,</span> <span class="n">after</span><span class="o">)</span> <span class="k">=&gt;</span> <span class="o">(</span><span class="nv">after</span><span class="o">.</span><span class="py">toEpochMilli</span><span class="o">()</span> <span class="o">-</span> <span class="nv">before</span><span class="o">.</span><span class="py">toEpochMilli</span><span class="o">()).</span><span class="py">millis</span>
@@ -53,8 +58,10 @@
         <span class="nc">IO</span><span class="o">(</span><span class="nf">println</span><span class="o">(</span><span class="n">s</span><span class="s">"Operation took ${duration}"</span><span class="o">))</span>
       <span class="o">}</span>
     <span class="o">}</span> <span class="o">&gt;&gt;</span>
-      <span class="nv">IO</span><span class="o">.</span><span class="py">pure</span><span class="o">(</span><span class="nv">ExitCode</span><span class="o">.</span><span class="py">Success</span><span class="o">)</span> 
+      <span class="nv">IO</span><span class="o">.</span><span class="py">pure</span><span class="o">(</span><span class="nv">ExitCode</span><span class="o">.</span><span class="py">Success</span><span class="o">)</span>
+    
   <span class="o">}</span>
+
 <span class="o">}</span>
 </code></pre></div></div>
 </div></div></section></main><footer id="site-footer"><div class="container"><div class="row"><p>rediculous is designed and developed by <a href="https://github.com/ChristopherDavenport/rediculous" target="_blank" rel="noopener noreferrer">Christopher Davenport</a></p></div></div></footer><script src="/rediculous/highlight/highlight.pack.js"></script><script>
