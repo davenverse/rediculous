@@ -119,12 +119,12 @@ object RedisCommands {
     val default = SetOpts(None, None, None, false)
   }
 
-  def set[F[_]: Concurrent](key: String, value: String, setOpts: SetOpts = SetOpts.default): Redis[F, Option[String]] = {
+  def set[F[_]: Concurrent](key: String, value: String, setOpts: SetOpts = SetOpts.default): Redis[F, Status] = {
     val ex = setOpts.setSeconds.toList.flatMap(l => List("EX", l.encode))
     val px = setOpts.setMilliseconds.toList.flatMap(l => List("PX", l.encode))
     val condition = setOpts.setCondition.toList.map(_.encode)
     val keepTTL = Alternative[List].guard(setOpts.keepTTL).as("KEEPTTL")
-    runRequestTotal[F, Option[String]](NEL("SET", key.encode :: value.encode :: ex ::: px ::: condition ::: keepTTL))
+    runRequestTotal(NEL("SET", key.encode :: value.encode :: ex ::: px ::: condition ::: keepTTL))
   }
 
   final case class ZAddOpts(
