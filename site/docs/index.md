@@ -3,7 +3,9 @@ layout: home
 
 ---
 
-# rediculous - A basic project [![Build Status](https://travis-ci.com/ChristopherDavenport/rediculous.svg?branch=master)](https://travis-ci.com/ChristopherDavenport/rediculous) [![Maven Central](https://maven-badges.herokuapp.com/maven-central/io.chrisdavenport/rediculous_2.12/badge.svg)](https://maven-badges.herokuapp.com/maven-central/io.chrisdavenport/rediculous_2.12)
+# rediculous - Pure FP Redis Client [![Build Status](https://travis-ci.com/ChristopherDavenport/rediculous.svg?branch=master)](https://travis-ci.com/ChristopherDavenport/rediculous) [![Maven Central](https://maven-badges.herokuapp.com/maven-central/io.chrisdavenport/rediculous_2.13/badge.svg)](https://maven-badges.herokuapp.com/maven-central/io.chrisdavenport/rediculous_2.13)
+
+REmote DIctionary Client, that's hysterical.
 
 ## Quick Start
 
