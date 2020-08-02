@@ -7,7 +7,7 @@ trait RedisArg[A]{
 }
 
 object RedisArg {
-  def apply[A](ev: RedisArg[A]): ev.type = ev
+  def apply[A](implicit ev: RedisArg[A]): ev.type = ev
 
   implicit val contra : Contravariant[RedisArg] = new Contravariant[RedisArg]{
     def contramap[A, B](fa: RedisArg[A])(f: B => A): RedisArg[B] = new RedisArg[B] {

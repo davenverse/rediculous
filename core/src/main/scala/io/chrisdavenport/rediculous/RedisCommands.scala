@@ -1,5 +1,7 @@
 package io.chrisdavenport.rediculous
 
+import cats._
+import cats.implicits._
 import cats.effect._
 import cats.data.{NonEmptyList => NEL}
 import RedisProtocol._
@@ -8,11 +10,217 @@ import _root_.io.chrisdavenport.rediculous.implicits._
 
 object RedisCommands {
 
+  def objectrefcount[F[_]: Concurrent](key: String): Redis[F, Long] = 
+    runRequestTotal(NEL.of("OBJECT", "refcount", key.encode))
+
+  def objectidletime[F[_]: Concurrent](key: String): Redis[F, Long] = 
+    runRequestTotal(NEL.of("OBJECT", "idletime", key.encode))
+
+  def objectencoding[F[_]: Concurrent](key: String): Redis[F, String] =
+    runRequestTotal(NEL.of("OBJECT", "encoding", key.encode))
+
+  def linsertbefore[F[_]: Concurrent](key: String, pivot: String, value: String): Redis[F, Long] = 
+    runRequestTotal(NEL.of("LINSERT", key.encode, "BEFORE", pivot.encode, value.encode))
+
+  def lisertafter[F[_]: Concurrent](key: String, pivot: String, value: String): Redis[F, Long] = 
+    runRequestTotal(NEL.of("LINSERT", key.encode, "AFTER", pivot.encode, value.encode))
+
+  def getType[F[_]: Concurrent](key: String): Redis[F, RedisType] = 
+    runRequestTotal(NEL.of("TYPE", key.encode))
+
+  // TODO slow log commands
+
+  def zrange[F[_]: Concurrent](key: String, start: Long, stop: Long): Redis[F, List[String]] = 
+    runRequestTotal(NEL.of("ZRANGE", key.encode, start.encode, stop.encode))
+
+  def zrangewithscores[F[_]: Concurrent](key: String, start: Long, stop: Long): Redis[F, List[(String, Double)]] = 
+    runRequestTotal(NEL.of("ZRANGE", key.encode, start.encode, stop.encode, "WITHSCORES"))
+
+  def zrevrange[F[_]: Concurrent](key: String, start: Long, stop: Long): Redis[F, List[String]] = 
+    runRequestTotal(NEL.of("ZREVRANGE", key.encode, start.encode, stop.encode))
+
+  def zrevrangewithscores[F[_]: Concurrent](key: String, start: Long, stop: Long): Redis[F, List[(String, Double)]] = 
+    runRequestTotal(NEL.of("ZREVRANGE", key.encode, start.encode, stop.encode, "WITHSCORES"))
+
+  def zrangebyscore[F[_]: Concurrent](key: String, min: Double, max: Double): Redis[F, List[String]] = 
+    runRequestTotal(NEL.of("ZRANGEBYSCORE", key.encode, min.encode, max.encode))
+
+  def zrangebyscorewithscores[F[_]: Concurrent](key: String, min: Double, max: Double): Redis[F, List[(String, Double)]] = 
+    runRequestTotal(NEL.of("ZRANGEBYSCORE", key.encode, min.encode, max.encode, "WITHSCORES"))
+
+  def zrangebyscorelimit[F[_]: Concurrent](key: String, min: Double, max: Double, offset: Long, count: Long): Redis[F, List[String]] =
+    runRequestTotal(NEL.of("ZRANGEBYSCORE", key.encode, min.encode, max.encode, "LIMIT", offset.encode, count.encode))
+
+  def zrangebyscorelimitwithscores[F[_]: Concurrent](key: String, min: Double, max: Double, offset: Long, count: Long): Redis[F, List[(String, Double)]] =
+    runRequestTotal(NEL.of("ZRANGEBYSCORE", key.encode, min.encode, max.encode, "WITHSCORES", "LIMIT", offset.encode, count.encode))
+
+  def zrevrangebyscore[F[_]: Concurrent](key: String, min: Double, max: Double): Redis[F, List[String]] = 
+    runRequestTotal(NEL.of("ZREVRANGEBYSCORE", key.encode, min.encode, max.encode))
+
+  def zrevrangebyscorewithscores[F[_]: Concurrent](key: String, min: Double, max: Double): Redis[F, List[(String, Double)]] =
+    runRequestTotal(NEL.of("ZREVRANGEBYSCORE", key.encode, min.encode, max.encode, "WITHSCORES"))
+
+  def zrevrangebyscorelimit[F[_]: Concurrent](key: String, min: Double, max: Double, offset: Long, count: Long): Redis[F, List[String]] = 
+    runRequestTotal(NEL.of("ZREVRANGEBYSCORE", key.encode, min.encode, max.encode, "LIMIT", offset.encode, count.encode))
+
+  def zrevrangebyscorelimitwithscores[F[_]: Concurrent](key: String, min: Double, max: Double, offset: Long, count: Long): Redis[F, List[(String, Double)]] = 
+    runRequestTotal(NEL.of("ZREVRANGEBYSCORE", key.encode, min.encode, max.encode, "WITHSCORES", "LIMIT", offset.encode, count.encode))
+
+  // TODO Sort
+  // TODO aggregate
+
+  def eval[F[_]: Concurrent, A: RedisResult](script: String, keys: List[String], args: List[String]): Redis[F, A] = 
+    runRequestTotal(NEL("EVAL", script :: keys.length.encode :: keys ::: args))
+
+  def evalsha[F[_]: Concurrent, A: RedisResult](script: String, keys: List[String], args: List[String]): Redis[F, A] = 
+    runRequestTotal(NEL("EVALSHA", script :: keys.length.encode :: keys ::: args))
+
+  def bitcount[F[_]: Concurrent](key: String): Redis[F, Long] = 
+    runRequestTotal(NEL.of("BITCOUNT", key.encode))
+
+  def bitcountrange[F[_]: Concurrent](key: String, start: Long, end: Long): Redis[F, Long] = 
+    runRequestTotal(NEL.of("BITCOUNT", key.encode, start.encode, end.encode))
+
+
+  private def bitop[F[_]: Concurrent](operation: String, keys: List[String]): Redis[F, Long]= 
+    runRequestTotal(NEL("BITOP", operation :: keys))
+
+  def bitopand[F[_]: Concurrent](destkey: String, srckeys: List[String]): Redis[F, Long] = 
+    bitop("AND", destkey :: srckeys)
+
+  def bitopor[F[_]: Concurrent](destkey: String, srckeys: List[String]): Redis[F, Long] = 
+    bitop("OR", destkey :: srckeys)
+
+  def bitopxor[F[_]: Concurrent](destkey: String, srckeys: List[String]): Redis[F, Long] = 
+    bitop("XOR", destkey :: srckeys)
+
+  def bitopnot[F[_]: Concurrent](destkey: String, srckey: String): Redis[F, Long] = 
+    bitop("NOT", destkey :: srckey :: Nil)
+
+  // TODO Migrate
+
+  sealed trait Condition
+  object Condition {
+    case object Nx extends Condition
+    case object Xx extends Condition
+    implicit val arg: RedisArg[Condition] = RedisArg[String].contramap[Condition]{
+      case Nx => "NX"
+      case Xx => "XX"
+    }
+  }
+
+  final case class SetOpts(
+    setSeconds: Option[Long],
+    setMilliseconds: Option[Long],
+    setCondition: Option[Condition],
+    keepTTL: Boolean
+  )
+  object SetOpts{
+    val default = SetOpts(None, None, None, false)
+  }
+
+  def set[F[_]: Concurrent](key: String, value: String, setOpts: SetOpts = SetOpts.default): Redis[F, Option[String]] = {
+    val ex = setOpts.setSeconds.toList.flatMap(l => List("EX", l.encode))
+    val px = setOpts.setMilliseconds.toList.flatMap(l => List("PX", l.encode))
+    val condition = setOpts.setCondition.toList.map(_.encode)
+    val keepTTL = Alternative[List].guard(setOpts.keepTTL).as("KEEPTTL")
+    runRequestTotal[F, Option[String]](NEL("SET", key.encode :: value.encode :: ex ::: px ::: condition ::: keepTTL))
+  }
+
+  final case class ZAddOpts(
+    condition: Option[Condition],
+    change: Boolean,
+    increment: Boolean
+  )
+  object ZAddOpts {
+    val default = ZAddOpts(None, false, false)
+  }
+
+  def zadd[F[_]: Concurrent](key: String, scoreMember: List[(Double, String)], options: ZAddOpts = ZAddOpts.default): Redis[F, Long] = {
+    val scores = scoreMember.flatMap{ case (x, y) => List(x.encode, y.encode)}
+    val condition = options.condition.toList.map(_.encode)
+    val change = Alternative[List].guard(options.change).as("CH")
+    val increment = Alternative[List].guard(options.increment).as("INCR")
+    runRequestTotal(NEL("ZADD", key :: condition ::: change ::: increment ::: scores))
+  }
+
+  sealed trait ReplyMode
+  object ReplyMode {
+    case object On extends ReplyMode
+    case object Off extends ReplyMode
+    case object Skip extends ReplyMode
+
+    implicit val arg: RedisArg[ReplyMode] = RedisArg[String].contramap[ReplyMode]{
+      case On => "ON"
+      case Off => "OFF"
+      case Skip => "SKIP"
+    }
+  }
+
+  def clientreply[F[_]: Concurrent](mode: ReplyMode): Redis[F, Boolean] = 
+    runRequestTotal(NEL.of("CLIENT REPLY", mode.encode))
+
+  def srandmember[F[_]: Concurrent](key: String): Redis[F, Option[String]] = 
+    runRequestTotal(NEL.of("SRANDMEMBER", key.encode))
+
+  def srandmemberMulti[F[_]: Concurrent](key: String, count: Long): Redis[F, List[String]] = 
+    runRequestTotal(NEL.of("SRANDMEMBER", key.encode, count.encode))
+
+  def spop[F[_]: Concurrent](key: String): Redis[F, Option[String]] = 
+    runRequestTotal(NEL.of("SPOP", key.encode))
+
+  def spopMulti[F[_]: Concurrent](key: String,  count: Long): Redis[F, List[String]] = 
+    runRequestTotal(NEL.of("SPOP", key.encode, count.encode))
+
+  def info[F[_]: Concurrent]: Redis[F, String] = 
+    runRequestTotal(NEL.of("INFO"))
+
+  def infosection[F[_]: Concurrent](section: String): Redis[F, String] = 
+    runRequestTotal(NEL.of("INFO", section.encode))
+
+  def exists[F[_]: Concurrent](key: String): Redis[F, Boolean] = 
+    runRequestTotal(NEL.of("EXISTS", key.encode))
+  
+  // TODO Scan
+  // TODO LEX
+  // TODO xadd
+  // TODO xread
+
+  def xgroupcreate[F[_]: Concurrent](stream: String, groupName: String, startId: String): Redis[F, Status] = 
+    runRequestTotal(NEL.of("XGROUP", "CREATE", stream, groupName, startId))
+
+  def xgroupsetid[F[_]: Concurrent](stream: String, groupName: String, messageId: String): Redis[F, Status] = 
+    runRequestTotal(NEL.of("XGROUP", "SETID", stream, groupName, messageId))
+
+  def xgroupdelconsumer[F[_]: Concurrent](stream: String, groupName: String, consumer: String): Redis[F, Long] = 
+    runRequestTotal(NEL.of("XGROUP", "DELCONSUMER", stream, groupName, consumer))
+
+  def xgroupdestroy[F[_]: Concurrent](stream: String, groupName: String): Redis[F, Boolean] =
+    runRequestTotal(NEL.of("XGROUP", "DESTROY", stream, groupName))
+
+  def xack[F[_]: Concurrent](stream: String, groupName: String, messageIds: List[String]): Redis[F, Long] = 
+    runRequestTotal(NEL("XACK", stream :: groupName :: messageIds))
+
+  // TODO xrange
+  // TODO xrevrange
+
+  def xlen[F[_]: Concurrent](stream: String): Redis[F, Long] = 
+    runRequestTotal(NEL.of("XLEN", stream))
+  
+  // TODO xpendingsummary
+  // TOOD xpendingdetail
+  // TODO xclaim
+  // TODO xinfo
+
+  def xdel[F[_]: Concurrent](stream: String, messageIds: List[String]): Redis[F, Long] = 
+    runRequestTotal(NEL("XDEL", stream :: messageIds))
+
+  // TODO xtrim
+
+  // Simple String Commands
+
   def ping[F[_]: Concurrent]: Redis[F, Status] =
     runRequestTotal[F, Status](NEL.of("PING"))
-
-  def set[F[_]: Concurrent](key: String, value: String): Redis[F, Option[String]] = 
-    runRequestTotal[F, Option[String]](NEL.of("SET", key.encode, value.encode))
 
   def ttl[F[_]: Concurrent](key: String): Redis[F, Long] = 
     runRequestTotal[F, Long](NEL.of("TTL", key.encode))
