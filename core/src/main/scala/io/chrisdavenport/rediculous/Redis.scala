@@ -6,7 +6,7 @@ import cats._
 import cats.effect._
 import cats.effect.concurrent.Semaphore
 
-final case class Redis[F[_], A](unRedis: Kleisli[Resource[F, *], RedisConnection[F], F[A]]){
+final case class Redis[F[_], A](unRedis: Kleisli[F, RedisConnection[F], F[A]]){
   def run(connection: RedisConnection[F])(implicit ev: Bracket[F, Throwable]): F[A] = {
     Redis.runRedis(this)(connection)
   }
@@ -14,14 +14,14 @@ final case class Redis[F[_], A](unRedis: Kleisli[Resource[F, *], RedisConnection
 object Redis {
 
   private def runRedis[F[_]: Bracket[*[_], Throwable], A](redis: Redis[F, A])(connection: RedisConnection[F]): F[A] = {
-    redis.unRedis.run(connection).use{fa => fa}
+    redis.unRedis.run(connection).flatten//.use{fa => fa}
   }
 
   def liftF[F[_]: Monad, A](fa: F[A]): Redis[F, A] = 
-    Redis(Kleisli.liftF[Resource[F, *], RedisConnection[F], A](Resource.liftF(fa)).map(_.pure[F]))
-  def liftFBackground[F[_]: Concurrent, A](fa: F[A]): Redis[F, A] = Redis(
-    Kleisli.liftF(Concurrent[F].background(fa))
-  )
+    Redis(Kleisli.liftF[F, RedisConnection[F], A](fa).map(_.pure[F]))
+  // def liftFBackground[F[_]: Concurrent, A](fa: F[A]): Redis[F, A] = Redis(
+  //   Kleisli.liftF(Concurrent[F].background(fa))
+  // )
 
   // def parTraverseN[G[_]: Traverse, F[_]: Parallel: Concurrent, A, B](g: G[A], fa: A => Redis[F, B], n: Int): Redis[F, G[B]] = Redis(
   //   Kleisli{connection: RedisConnection[F] =>
@@ -76,7 +76,7 @@ object Redis {
         }
       ))
       def pure[A](x: A): Par[F,A] = Par(Redis(
-        Kleisli.pure[Resource[F, *], RedisConnection[F], F[A]](x.pure[F])
+        Kleisli.pure[F, RedisConnection[F], F[A]](x.pure[F])
       ))
     }
 
@@ -85,23 +85,23 @@ object Redis {
   implicit def monad[F[_]: Monad]: Monad[Redis[F, *]] = new Monad[Redis[F, *]]{
 
     def tailRecM[A, B](a: A)(f: A => Redis[F,Either[A,B]]): Redis[F,B] = Redis(
-      Monad[Kleisli[Resource[F, *], RedisConnection[F], *]].tailRecM[A, B](a)(f.andThen(_.unRedis.flatMap(fe => Kleisli.liftF(Resource.liftF(fe)))))
+      Monad[Kleisli[F, RedisConnection[F], *]].tailRecM[A, B](a)(f.andThen(_.unRedis.flatMap(fe => Kleisli.liftF(fe))))
         .map(_.pure[F])
     )
 
     def flatMap[A, B](fa: Redis[F,A])(f: A => Redis[F,B]): Redis[F,B] = Redis(
       fa.unRedis.flatMap(fa => 
-        Kleisli.liftF[Resource[F, *], RedisConnection[F], A](Resource.liftF(fa))
+        Kleisli.liftF[F, RedisConnection[F], A](fa)
           .flatMap(a =>
-            Monad[Kleisli[Resource[F, *], RedisConnection[F], *]].tailRecM[A, F[B]](a)(
-              f.andThen(_.unRedis.flatMap(fe => Kleisli.liftF(Resource.liftF(fe.map(e => Either.right(e).map(_.pure[F]))))))
+            Monad[Kleisli[F, RedisConnection[F], *]].tailRecM[A, F[B]](a)(
+              f.andThen(_.unRedis.flatMap(fe => Kleisli.liftF(fe.map(e => Either.right(e).map(_.pure[F])))))
             )
           )
       )
     )
     
     def pure[A](x: A): Redis[F, A] = Redis(
-      Kleisli.pure[Resource[F, *], RedisConnection[F], F[A]](x.pure[F])
+      Kleisli.pure[F, RedisConnection[F], F[A]](x.pure[F])
     )
   }
 

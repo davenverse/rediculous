@@ -21,25 +21,25 @@ object BasicExample extends IOApp {
     val r = for {
       blocker <- Blocker[IO]
       sg <- SocketGroup[IO](blocker)
-      connection <- RedisConnection.queued[IO](sg, new InetSocketAddress("localhost", 6379), maxQueued = 20000, workers = 2)
+      connection <- RedisConnection.queued[IO](sg, new InetSocketAddress("localhost", 6379), maxQueued = 20000, workers = 1)
     } yield connection
 
     r.use {client =>
-        val r = (
-          RedisCommands.ping[IO],
-          RedisCommands.get[IO]("foo"),
-          RedisCommands.set[IO]("foo", "value"),
-          RedisCommands.get[IO]("foo")
-        ).parTupled
+        // val r = (
+        //   RedisCommands.ping[IO],
+        //   RedisCommands.get[IO]("foo"),
+        //   RedisCommands.set[IO]("foo", "value"),
+        //   RedisCommands.get[IO]("foo")
+        // ).parTupled
 
-      // val r2 = List.fill(1000)(r.run(client)).parSequence
+      val r2 = List.fill(1000)(RedisCommands.ping[IO]).parSequence
 
       val now = IO(java.time.Instant.now)
-        // a.run(client).flatTap(a => IO(println(a)))
-      // val r = List.fill(100)(Protocol.ping[IO]).parSequence
-      (now,
-        Stream(()).covary[IO].repeat.map(_ => Stream.eval(r.run(client))).parJoin(20).take(10000).compile.drain,
-      now).mapN{
+      (
+        now,
+        Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2.run(client))).parJoin(10).take(1000000).compile.drain,
+        now
+      ).mapN{
         case (before, _, after) => (after.toEpochMilli() - before.toEpochMilli()).millis
       }.flatMap{ duration => 
         IO(println(s"Operation took ${duration}"))
