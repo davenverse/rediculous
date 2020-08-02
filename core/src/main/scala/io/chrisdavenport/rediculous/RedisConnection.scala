@@ -76,7 +76,7 @@ object RedisConnection{
   }
 
 
-  private[rediculous] def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String]): Redis[F, A] = Redis(Kleisli{connection: RedisConnection[F] => 
+  def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String]): Redis[F, A] = Redis(Kleisli{connection: RedisConnection[F] => 
     runRequest(connection)(input).map{ fE => 
       fE.flatMap{
         case Right(a) => a.pure[F]

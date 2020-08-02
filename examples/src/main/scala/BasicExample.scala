@@ -37,7 +37,7 @@ object BasicExample extends IOApp {
       val now = IO(java.time.Instant.now)
       (
         now,
-        Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2.run(client))).parJoin(10).take(1000000).compile.drain,
+        Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2.run(client))).parJoin(10).take(100000000).compile.drain,
         now
       ).mapN{
         case (before, _, after) => (after.toEpochMilli() - before.toEpochMilli()).millis

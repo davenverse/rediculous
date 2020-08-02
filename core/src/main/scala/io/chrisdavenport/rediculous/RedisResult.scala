@@ -78,9 +78,10 @@ object RedisResult extends RedisResultLowPriority{
     }
   }
 
-  implicit val int: RedisResult[Int] = long.map(_.toInt) // Integers are longs in redis, use at your own risk.
+  // Increment
+  implicit val double: RedisResult[Double] = ???
 
-  // TODO Double
+  implicit val int: RedisResult[Int] = long.map(_.toInt) // Integers are longs in redis, use at your own risk.
 
   implicit def tuple[A: RedisResult, B: RedisResult]: RedisResult[(A, B)] = new RedisResult[(A, B)] {
     def decode(resp: Resp): Either[Resp,(A, B)] = resp match {
