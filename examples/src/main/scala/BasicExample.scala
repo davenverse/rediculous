@@ -13,23 +13,23 @@ object BasicExample extends IOApp {
     val r = for {
       blocker <- Blocker[IO]
       sg <- SocketGroup[IO](blocker)
-      connection <- RedisConnection.queued[IO](sg, new InetSocketAddress("localhost", 6379), maxQueued = 20000, workers = 1)
+      connection <- RedisConnection.queued[IO](sg, new InetSocketAddress("localhost", 6379), maxQueued = 1000, workers = 2)
     } yield connection
 
     r.use {client =>
-        // val r = (
-        //   RedisCommands.ping[IO],
-        //   RedisCommands.get[IO]("foo"),
-        //   RedisCommands.set[IO]("foo", "value"),
-        //   RedisCommands.get[IO]("foo")
-        // ).parTupled
+      val r = (
+        RedisCommands.ping[IO],
+        RedisCommands.get[IO]("foo"),
+        RedisCommands.set[IO]("foo", "value"),
+        RedisCommands.get[IO]("foo")
+      ).parTupled
 
-      val r2 = List.fill(1000)(RedisCommands.ping[IO]).parSequence
+      val r2 = List.fill(1000)(r).parSequence
 
       val now = IO(java.time.Instant.now)
       (
         now,
-        Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2.run(client))).parJoin(10).take(100000000).compile.drain,
+        Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2.run(client))).parJoin(10).take(1000000).compile.drain,
         now
       ).mapN{
         case (before, _, after) => (after.toEpochMilli() - before.toEpochMilli()).millis
