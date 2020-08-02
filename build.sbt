@@ -46,7 +46,7 @@ lazy val site = project.in(file("site"))
     import microsites._
     Seq(
       micrositeName := "rediculous",
-      micrositeDescription := "A basic project",
+      micrositeDescription := "Pure FP Redis Client",
       micrositeAuthor := "Christopher Davenport",
       micrositeGithubOwner := "ChristopherDavenport",
       micrositeGithubRepo := "rediculous",
