@@ -117,7 +117,7 @@ object Resp {
   case class Integer(long: Long) extends Resp
   object Integer {
     def encode(i: Integer): SArray[Byte] = {
-      SArray(Colon) ++ i.long.toString().getBytes().dropRight(1)
+      SArray(Colon) ++ i.long.toString().getBytes() ++ CRLF
     }
     def parse(arr: SArray[Byte]): RespParserResult[Integer] = {
       var idx = 1
