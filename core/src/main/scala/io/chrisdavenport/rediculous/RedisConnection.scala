@@ -1,6 +1,5 @@
 package io.chrisdavenport.rediculous
 
-
 import cats.effect._
 import cats.effect.concurrent._
 import cats.effect.implicits._
@@ -14,13 +13,14 @@ import fs2._
 import java.net.InetSocketAddress
 import scala.concurrent.duration._
 
-sealed trait Connection[F[_]]
-object Connection{
-  private case class Queued[F[_]](queue: Queue[F, (Deferred[F, Either[Throwable, Resp]], Resp)]) extends Connection[F]
+
+sealed trait RedisConnection[F[_]]
+object RedisConnection{
+  private case class Queued[F[_]](queue: Queue[F, (Deferred[F, Either[Throwable, Resp]], Resp)]) extends RedisConnection[F]
   private case class PooledConnection[F[_]](
     pool: KeyPool[F, Unit, (Socket[F], F[Unit])]
-  ) extends Connection[F]
-  private case class DirectConnection[F[_]](socket: Socket[F]) extends Connection[F]
+  ) extends RedisConnection[F]
+  private case class DirectConnection[F[_]](socket: Socket[F]) extends RedisConnection[F]
 
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
@@ -52,7 +52,13 @@ object Connection{
   }
 
   // Can Be used to implement any low level protocols.
-  def runRequest[F[_]: Concurrent, A: RedisResult](connection: Connection[F])(resp: Resp): Resource[F, F[Either[Resp, A]]] = {
+  def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String]): Resource[F, F[Either[Resp, A]]] = {
+    // All Commands Appear to share this encoding.
+    val resp = Resp.Array(
+      Some(
+        input.toList.map(a => Resp.BulkString(Some(a)))
+      )
+    )
     def withSocket(socket: Socket[F]): F[Resp] = explicitPipelineRequest[F](socket, Chunk.singleton(resp)).map(_.head)
     connection match {
       case PooledConnection(pool) => pool.map(_._1).take(()).evalMap{
@@ -70,17 +76,28 @@ object Connection{
     }
   }
 
-  def single[F[_]: Concurrent: ContextShift](sg: SocketGroup, address: InetSocketAddress): Resource[F, Connection[F]] = 
-    sg.client[F](address).map(Connection.DirectConnection(_))
 
-  def pool[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, address: InetSocketAddress): Resource[F, Connection[F]] = 
+  private[rediculous] def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String]): Redis[F, A] = Redis(Kleisli{connection: RedisConnection[F] => 
+    runRequest(connection)(input).map{ fE => 
+      fE.flatMap{
+        case Right(a) => a.pure[F]
+        case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
+        case Left(other) => ApplicativeError[F, Throwable].raiseError[A](new Throwable(s"Rediculous: Incompatible Return Type for Operation: ${input.head}, got: $other"))
+      }
+    }
+  })
+
+  def single[F[_]: Concurrent: ContextShift](sg: SocketGroup, address: InetSocketAddress): Resource[F, RedisConnection[F]] = 
+    sg.client[F](address).map(RedisConnection.DirectConnection(_))
+
+  def pool[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, address: InetSocketAddress): Resource[F, RedisConnection[F]] = 
     KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
       {_ => sg.client[F](address).allocated.flatTap(a => Sync[F].delay(println(s"Created Redis Connection to $address")))},
       { case (_, shutdown) => Sync[F].delay(println("Shutting down redis connection")) >> shutdown}
     ).build.map(PooledConnection[F](_))
 
   // Only allows 1k queued actions, before new actions block to be accepted.
-  def queued[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, address: InetSocketAddress, maxQueued: Int = 1000, workers: Int = 2): Resource[F, Connection[F]] = 
+  def queued[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, address: InetSocketAddress, maxQueued: Int = 1000, workers: Int = 2): Resource[F, RedisConnection[F]] = 
     for {
       queue <- Resource.liftF(Queue.bounded[F, (Deferred[F, Either[Throwable,Resp]], Resp)](maxQueued))
       keypool <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](

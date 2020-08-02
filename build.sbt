@@ -17,12 +17,21 @@ val betterMonadicForV = "0.3.1"
 lazy val `rediculous` = project.in(file("."))
   .disablePlugins(MimaPlugin)
   .enablePlugins(NoPublishPlugin)
-  .aggregate(core)
+  .aggregate(core, examples)
 
 lazy val core = project.in(file("core"))
   .settings(commonSettings)
   .settings(
-    name := "rediculous",
+    name := "rediculous"
+  )
+
+lazy val examples = project.in(file("examples"))
+  .settings(commonSettings)
+  .disablePlugins(MimaPlugin)
+  .enablePlugins(NoPublishPlugin)
+  .dependsOn(core)
+  .settings(
+    name := "rediculous-examples",
     fork in run := true
   )
 
