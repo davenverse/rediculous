@@ -1,6 +1,5 @@
 package io.chrisdavenport.rediculous
 
-import fs2._
 import scala.collection.mutable
 import cats.implicits._
 
@@ -39,7 +38,7 @@ object Resp {
     def loop(arr: SArray[Byte]): RespParserResult[List[Resp]] = {
       if (arr.isEmpty) ParseComplete(listBuffer.toList, arr)
       else parse(arr) match {
-        case i@ParseIncomplete(out) => ParseComplete(listBuffer.toList, out)
+        case ParseIncomplete(out) => ParseComplete(listBuffer.toList, out)
         case ParseComplete(value, rest) =>
           listBuffer.append(value)
           loop(rest)
@@ -179,16 +178,16 @@ object Resp {
   object Array {
     def encode(a: Array): SArray[Byte] = {
       val buffer = new mutable.ArrayBuffer[Byte]
-      buffer.addOne(Star)
+      buffer += Star
       a.a match {
         case None => 
-          buffer.addAll(MinusOne)
-          buffer.addAll(CRLF)
+          buffer ++= MinusOne
+          buffer ++= CRLF
         case Some(value) => 
-          buffer.addAll(value.size.toString().getBytes())
-          buffer.addAll(CRLF)
+          buffer ++= value.size.toString().getBytes()
+          buffer ++= CRLF
           value.foreach(resp => 
-            buffer.addAll(Resp.encode(resp))
+            buffer ++= Resp.encode(resp)
           )
       }
       buffer.toArray

@@ -1,12 +1,10 @@
 package io.chrisdavenport.rediculous
 
 import cats.effect._
-import cats.data._
 import cats.data.{NonEmptyList => NEL}
 import RedisProtocol._
 import RedisConnection.runRequestTotal
 import _root_.io.chrisdavenport.rediculous.implicits._
-import cats.syntax.distributive
 
 object RedisCommands {
 

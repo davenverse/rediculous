@@ -4,7 +4,6 @@ import cats.data._
 import cats.implicits._
 import cats._
 import cats.effect._
-import cats.effect.concurrent.Semaphore
 
 final case class Redis[F[_], A](unRedis: Kleisli[F, RedisConnection[F], F[A]]){
   def run(connection: RedisConnection[F])(implicit ev: Bracket[F, Throwable]): F[A] = {
@@ -19,18 +18,6 @@ object Redis {
 
   def liftF[F[_]: Monad, A](fa: F[A]): Redis[F, A] = 
     Redis(Kleisli.liftF[F, RedisConnection[F], A](fa).map(_.pure[F]))
-  // def liftFBackground[F[_]: Concurrent, A](fa: F[A]): Redis[F, A] = Redis(
-  //   Kleisli.liftF(Concurrent[F].background(fa))
-  // )
-
-  // def parTraverseN[G[_]: Traverse, F[_]: Parallel: Concurrent, A, B](g: G[A], fa: A => Redis[F, B], n: Int): Redis[F, G[B]] = Redis(
-  //   Kleisli{connection: RedisConnection[F] =>
-  //     for {
-  //       sem <- Resource.liftF(Semaphore[F](n))
-  //       run <- g.parTraverse(a => Resource.make(sem.acquire)(_ => sem.release) >> fa(a).unRedis.run(connection))
-  //     } yield run.parTraverse(a => sem.withPermit(a))
-  //   }
-  // )
 
   /**
    * Newtype encoding for a `Redis` datatype that has a `cats.Applicative`

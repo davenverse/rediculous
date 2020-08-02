@@ -30,7 +30,7 @@ object RedisConnection{
       case None => 
         ApplicativeError[F, Throwable].raiseError[List[Resp]](new Throwable("Terminated Before reaching Equal size"))
       case Some(bytes) => 
-        Resp.parseAll(lastArr ++ bytes.toArray) match {
+        Resp.parseAll(lastArr.toArray ++ bytes.toArray.toIterable) match {
           case e@Resp.ParseError(_, _) => ApplicativeError[F, Throwable].raiseError[List[Resp]](e)
           case Resp.ParseIncomplete(arr) => getTillEqualSize(acc, arr)
           case Resp.ParseComplete(value, rest) => 
@@ -43,7 +43,7 @@ object RedisConnection{
       val arrayB = new scala.collection.mutable.ArrayBuffer[Byte]
         calls.toList.foreach{
           case resp => 
-            arrayB.addAll(Resp.encode(resp))
+            arrayB.++=(Resp.encode(resp))
         }
       socket.write(Chunk.bytes(arrayB.toArray)) >>
       getTillEqualSize(List.empty, Array.emptyByteArray)
@@ -62,7 +62,7 @@ object RedisConnection{
     connection match {
       case PooledConnection(pool) => pool.map(_._1).take(()).use{
         m => withSocket(m.value).attempt.flatTap{
-          case Left(e) => m.canBeReused.set(Reusable.DontReuse)
+          case Left(_) => m.canBeReused.set(Reusable.DontReuse)
           case _ => Applicative[F].unit
         }
       }.rethrow.map(RedisResult[A].decode).map(_.pure[F])
@@ -109,7 +109,7 @@ object RedisConnection{
                 Stream.eval(keypool.map(_._1).take(()).use{m =>
                   val out = chunk.map(_._2)
                   explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
-                    case Left(e) => m.canBeReused.set(Reusable.DontReuse)
+                    case Left(_) => m.canBeReused.set(Reusable.DontReuse)
                     case _ => Applicative[F].unit
                   }
                 }.flatMap{

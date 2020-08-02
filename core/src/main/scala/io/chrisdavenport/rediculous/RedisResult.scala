@@ -2,7 +2,6 @@ package io.chrisdavenport.rediculous
 
 import cats._
 import cats.implicits._
-import io.chrisdavenport.rediculous.Resp.BulkString
 
 trait RedisResult[+A]{
   def decode(resp: Resp): Either[Resp, A]
@@ -79,7 +78,10 @@ object RedisResult extends RedisResultLowPriority{
   }
 
   // Increment
-  implicit val double: RedisResult[Double] = ???
+  implicit val double: RedisResult[Double] = new RedisResult[Double] {
+    def decode(resp: Resp): Either[Resp,Double] = RedisResult[String].decode(resp)
+      .flatMap(s => Either.catchNonFatal(s.toDouble).leftMap(_ => resp))
+  }
 
   implicit val int: RedisResult[Int] = long.map(_.toInt) // Integers are longs in redis, use at your own risk.
 

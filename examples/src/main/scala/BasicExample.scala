@@ -1,19 +1,11 @@
 
-import cats._
+import io.chrisdavenport.rediculous._
 import cats.implicits._
 import cats.effect._
-import cats.effect.implicits._
-import cats.data._
-import cats.effect.concurrent._
 import fs2.io.tcp._
-import fs2.concurrent.Queue
 import java.net.InetSocketAddress
 import fs2._
 import scala.concurrent.duration._
-import _root_.io.chrisdavenport.keypool.KeyPoolBuilder
-import java.net.InetAddress
-import _root_.io.chrisdavenport.keypool.Reusable.DontReuse
-import _root_.io.chrisdavenport.rediculous._
 
 object BasicExample extends IOApp {
 
