@@ -73,7 +73,8 @@ object RedisResult extends RedisResultLowPriority{
   implicit val long: RedisResult[Long] = new RedisResult[Long] {
     def decode(resp: Resp): Either[Resp,Long] = resp match {
       case Resp.Integer(l) => Right(l)
-      case other => Left(other)
+      case other => RedisResult[String].decode(other)
+        .flatMap(s => Either.catchNonFatal(s.toLong).leftMap(_ => resp))
     }
   }
 
