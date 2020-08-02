@@ -6,14 +6,14 @@ import cats._
 import cats.effect._
 
 final case class Redis[F[_], A](unRedis: Kleisli[F, RedisConnection[F], F[A]]){
-  def run(connection: RedisConnection[F])(implicit ev: Bracket[F, Throwable]): F[A] = {
+  def run(connection: RedisConnection[F])(implicit ev: Monad[F]): F[A] = {
     Redis.runRedis(this)(connection)
   }
 }
 object Redis {
 
-  private def runRedis[F[_]: Bracket[*[_], Throwable], A](redis: Redis[F, A])(connection: RedisConnection[F]): F[A] = {
-    redis.unRedis.run(connection).flatten//.use{fa => fa}
+  private def runRedis[F[_]: Monad, A](redis: Redis[F, A])(connection: RedisConnection[F]): F[A] = {
+    redis.unRedis.run(connection).flatten
   }
 
   def liftF[F[_]: Monad, A](fa: F[A]): Redis[F, A] = 
