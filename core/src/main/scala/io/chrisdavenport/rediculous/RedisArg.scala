@@ -24,7 +24,7 @@ object RedisArg {
   }
 
   implicit val long = new RedisArg[Long] {
-    def encode(a: Long): String = a.toString().dropRight(1)
+    def encode(a: Long): String = a.toString()
   }
 
   // Check this later
@@ -32,7 +32,7 @@ object RedisArg {
     def encode(a: Double): String = 
       if (a.isInfinite() && a > 0) "+inf"
       else if (a.isInfinite() && a < 0) "-inf"
-      else a.toString().dropRight(1)
+      else a.toString()
   }
 
 }
