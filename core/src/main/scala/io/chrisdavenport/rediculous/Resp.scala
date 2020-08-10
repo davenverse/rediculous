@@ -49,7 +49,7 @@ object Resp {
   }
 
   def parse(arr: SArray[Byte]): RespParserResult[Resp] = {
-    if (arr.size >= 0) {
+    if (arr.size > 0) {
       val switchVal = arr(0)
       switchVal match {
         case Plus => SimpleString.parse(arr)
@@ -65,6 +65,7 @@ object Resp {
   }
 
     // First Byte is +
+    // +foo/r/n
   case class SimpleString(value: String) extends Resp
   object SimpleString {
     def encode(s: SimpleString): SArray[Byte] = {
@@ -139,6 +140,7 @@ object Resp {
     }
   }
   // First Byte is $
+  // $3/r/n/foo/r/n
   case class BulkString(value: Option[String]) extends Resp
   object BulkString {
     def encode(b: BulkString): SArray[Byte] = {
@@ -162,10 +164,10 @@ object Resp {
           idx += 2
         }
         if (length == -1) ParseComplete(BulkString(None), arr.drop(idx))
-        else {
+        else if (idx + length + 2 < arr.size) {
           val out = new String(arr, idx, length)
           ParseComplete(BulkString(Some(out)), arr.drop(idx + length + 2))
-        }
+        } else ParseIncomplete(arr)
       } catch {
         case scala.util.control.NonFatal(e) => 
           ParseError(s"Error in BulkString Processing: ${e.getMessage}", Some(e))
