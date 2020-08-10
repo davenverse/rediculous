@@ -2,6 +2,8 @@ package io.chrisdavenport.rediculous
 
 import scala.collection.mutable
 import cats.implicits._
+import scala.util.control.NonFatal
+import java.nio.charset.StandardCharsets
 
 sealed trait Resp
 
@@ -49,7 +51,7 @@ object Resp {
   }
 
   def parse(arr: SArray[Byte]): RespParserResult[Resp] = {
-    if (arr.size >= 0) {
+    if (arr.size > 0) {
       val switchVal = arr(0)
       switchVal match {
         case Plus => SimpleString.parse(arr)
@@ -65,10 +67,11 @@ object Resp {
   }
 
     // First Byte is +
+    // +foo/r/n
   case class SimpleString(value: String) extends Resp
   object SimpleString {
     def encode(s: SimpleString): SArray[Byte] = {
-      SArray(Plus) ++ s.value.getBytes() ++ CRLF
+      SArray(Plus) ++ s.value.getBytes(StandardCharsets.UTF_8) ++ CRLF
     }
     def parse(arr: SArray[Byte]): RespParserResult[SimpleString] = {
       var idx = 1
@@ -78,13 +81,13 @@ object Resp {
           idx += 1
         }
         if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr, 1, idx - 1)
+          val out = new  String(arr, 1, idx - 1, StandardCharsets.UTF_8)
           ParseComplete(SimpleString(out), arr.drop(idx + 2))
         } else {
           ParseIncomplete(arr)
         }
       } catch {
-        case scala.util.control.NonFatal(e) => 
+        case NonFatal(e) => 
           ParseError(s"Error in RespSimpleString Processing: ${e.getMessage}", Some(e))
       }
     }
@@ -93,7 +96,7 @@ object Resp {
   case class Error(value: String) extends Throwable(s"Resp Error- $value") with Resp
   object Error {
     def encode(error: Error): SArray[Byte] = 
-      SArray(Minus) ++ error.value.getBytes() ++ CRLF
+      SArray(Minus) ++ error.value.getBytes(StandardCharsets.UTF_8) ++ CRLF
     def parse(arr: SArray[Byte]): RespParserResult[Error] = {
       var idx = 1
       try {
@@ -102,13 +105,13 @@ object Resp {
           idx += 1
         }
         if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr, 1, idx - 1)
+          val out = new  String(arr, 1, idx - 1, StandardCharsets.UTF_8)
           ParseComplete(Error(out), arr.drop(idx + 2))
         } else {
           ParseIncomplete(arr)
         }
       } catch {
-        case scala.util.control.NonFatal(e) => 
+        case NonFatal(e) => 
           ParseError(s"Error in Resp Error Processing: ${e.getMessage}", Some(e))
       }
     }
@@ -117,7 +120,7 @@ object Resp {
   case class Integer(long: Long) extends Resp
   object Integer {
     def encode(i: Integer): SArray[Byte] = {
-      SArray(Colon) ++ i.long.toString().getBytes() ++ CRLF
+      SArray(Colon) ++ i.long.toString().getBytes(StandardCharsets.UTF_8) ++ CRLF
     }
     def parse(arr: SArray[Byte]): RespParserResult[Integer] = {
       var idx = 1
@@ -127,25 +130,29 @@ object Resp {
           idx += 1
         }
         if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr, 1, idx - 1).toLong
+          val out = new  String(arr, 1, idx - 1, StandardCharsets.UTF_8).toLong
           ParseComplete(Integer(out), arr.drop(idx + 2))
         } else {
           ParseIncomplete(arr)
         }
       } catch {
-        case scala.util.control.NonFatal(e) => 
+        case NonFatal(e) => 
           ParseError(s"Error in  RespInteger Processing: ${e.getMessage}", Some(e))
       }
     }
   }
   // First Byte is $
+  // $3/r/n/foo/r/n
   case class BulkString(value: Option[String]) extends Resp
   object BulkString {
     def encode(b: BulkString): SArray[Byte] = {
       b.value match {
         case None => SArray(Dollar) ++ MinusOne ++ CRLF
-        case Some(s) => SArray(Dollar) ++ s.length().toString().getBytes() ++ CRLF ++ 
-          s.getBytes() ++ CRLF
+        case Some(s) => {
+          val bytes = s.getBytes(StandardCharsets.UTF_8)
+          SArray(Dollar) ++ bytes.size.toString.getBytes(StandardCharsets.UTF_8) ++ CRLF ++ 
+          bytes ++ CRLF
+        }
       }
     }
     def parse(arr: SArray[Byte]): RespParserResult[BulkString] = {
@@ -157,17 +164,17 @@ object Resp {
           idx += 1
         }
         if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr, 1, idx - 1).toInt 
+          val out = new  String(arr, 1, idx - 1, StandardCharsets.UTF_8).toInt 
           length = out
           idx += 2
         }
         if (length == -1) ParseComplete(BulkString(None), arr.drop(idx))
-        else {
-          val out = new String(arr, idx, length)
+        else if (idx + length + 2 <= arr.size)  {
+          val out = new String(arr, idx, length, StandardCharsets.UTF_8)
           ParseComplete(BulkString(Some(out)), arr.drop(idx + length + 2))
-        }
+        } else ParseIncomplete(arr)
       } catch {
-        case scala.util.control.NonFatal(e) => 
+        case NonFatal(e) => 
           ParseError(s"Error in BulkString Processing: ${e.getMessage}", Some(e))
       }
     }
@@ -184,7 +191,7 @@ object Resp {
           buffer ++= MinusOne
           buffer ++= CRLF
         case Some(value) => 
-          buffer ++= value.size.toString().getBytes()
+          buffer ++= value.size.toString().getBytes(StandardCharsets.UTF_8)
           buffer ++= CRLF
           value.foreach(resp => 
             buffer ++= Resp.encode(resp)
@@ -201,7 +208,7 @@ object Resp {
           idx += 1
         }
         if (idx < arr.size && (idx +1 <= arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr, 1, idx - 1).toInt 
+          val out = new  String(arr, 1, idx - 1, StandardCharsets.UTF_8).toInt 
           length = out
           idx += 2
         }
@@ -222,7 +229,7 @@ object Resp {
           repeatParse(next, length, List.empty)
         }
       } catch {
-        case scala.util.control.NonFatal(e) => 
+        case NonFatal(e) => 
           ParseError(s"Error in RespArray Processing: ${e.getMessage}", Some(e))
       }
     }
