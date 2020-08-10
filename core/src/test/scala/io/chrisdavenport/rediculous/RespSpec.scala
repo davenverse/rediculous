@@ -120,7 +120,7 @@ class RespSpec extends Specification with ScalaCheck {
         case p@ParseIncomplete(_) => ko(s"Got Incomplete Result $p")
         case e@ParseError(_,_) => ko(s"Got ParseError $e")
       }
-    }.setGen(org.scalacheck.Gen.asciiStr) // Get this to all strings?
+    }
 
     "parse an empty array" in {
       val init = "*0\r\n"
