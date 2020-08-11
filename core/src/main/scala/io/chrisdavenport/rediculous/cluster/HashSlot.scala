@@ -8,7 +8,7 @@ object HashSlot {
   }
   
   def hashKey(key: String): String = {
-    val s = key.indexOf('}')
+    val s = key.indexOf('{')
     if (s >= 0) {
       val e = key.indexOf('}')
       if (e >= 0 && e != s + 1) key.substring(s, e)
