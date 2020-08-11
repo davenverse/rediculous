@@ -16,7 +16,7 @@ import scala.concurrent.duration._
 
 sealed trait RedisConnection[F[_]]
 object RedisConnection{
-  private case class Queued[F[_]](queue: Queue[F, (Deferred[F, Either[Throwable, Resp]], Resp)]) extends RedisConnection[F]
+  private case class Queued[F[_]](queue: Queue[F, Chunk[(Deferred[F, Either[Throwable, Resp]], Resp)]], usePool: Resource[F, Managed[F, Socket[F]]]) extends RedisConnection[F]
   private case class PooledConnection[F[_]](
     pool: KeyPool[F, Unit, (Socket[F], F[Unit])]
   ) extends RedisConnection[F]
@@ -50,31 +50,48 @@ object RedisConnection{
     } else Applicative[F].pure(List.empty)
   }
 
-  // Can Be used to implement any low level protocols.
-  def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String]): F[F[Either[Resp, A]]] = {
-    // All Commands Appear to share this encoding.
-    val resp = Resp.Array(
-      Some(
-        input.toList.map(a => Resp.BulkString(Some(a)))
-      )
-    )
-    def withSocket(socket: Socket[F]): F[Resp] = explicitPipelineRequest[F](socket, Chunk.singleton(resp)).map(_.head)
-    connection match {
+  def runRequestInternal[F[_]: Concurrent](connection: RedisConnection[F])(
+    inputs: NonEmptyList[NonEmptyList[String]]): F[F[NonEmptyList[Resp]]] = {
+      val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
+      def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => Sync[F].delay(l.toNel.get)) // TODO Option.get
+      connection match {
       case PooledConnection(pool) => pool.map(_._1).take(()).use{
         m => withSocket(m.value).attempt.flatTap{
           case Left(_) => m.canBeReused.set(Reusable.DontReuse)
           case _ => Applicative[F].unit
         }
-      }.rethrow.map(RedisResult[A].decode).map(_.pure[F])
-      case DirectConnection(socket) => withSocket(socket).map(RedisResult[A].decode).map(_.pure[F])
-      case Queued(queue) => Deferred[F, Either[Throwable, Resp]].flatMap{d => 
-        queue.enqueue1((d, resp)).as {
-          d.get.rethrow.map(RedisResult[A].decode)
-        }     
+      }.rethrow.map(_.pure[F])
+      case DirectConnection(socket) => withSocket(socket).map(_.pure[F])
+      case Queued(queue, _) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map((_, resp))).flatMap{ c => 
+        queue.enqueue1(c).as {
+          c.traverse(_._1.get).flatMap(_.sequence.traverse(l => Sync[F].delay(l.toNel.get))).rethrow // TODO Option GET
+        }   
       }
+
     }
   }
 
+  // Can Be used to implement any low level protocols.
+  def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String]): F[F[Either[Resp, A]]] = 
+    runRequestInternal(connection)(NonEmptyList.of(input)).map(_.map(nel => RedisResult[A].decode(nel.head)))
+  // {
+  //   val resp = Resp.renderRequest(input)
+  //   def withSocket(socket: Socket[F]): F[Resp] = explicitPipelineRequest[F](socket, Chunk.singleton(resp)).map(_.head)
+  //   connection match {
+  //     case PooledConnection(pool) => pool.map(_._1).take(()).use{
+  //       m => withSocket(m.value).attempt.flatTap{
+  //         case Left(_) => m.canBeReused.set(Reusable.DontReuse)
+  //         case _ => Applicative[F].unit
+  //       }
+  //     }.rethrow.map(RedisResult[A].decode).map(_.pure[F])
+  //     case DirectConnection(socket) => withSocket(socket).map(RedisResult[A].decode).map(_.pure[F])
+  //     case Queued(queue, _) => Deferred[F, Either[Throwable, Resp]].flatMap{d => 
+  //       queue.enqueue1(Chunk.singleton((d, resp))).as {
+  //         d.get.rethrow.map(RedisResult[A].decode)
+  //       }   
+  //     }
+  //   }
+  // }
 
   def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String]): Redis[F, A] = Redis(Kleisli{connection: RedisConnection[F] => 
     runRequest(connection)(input).map{ fE => 
@@ -85,6 +102,13 @@ object RedisConnection{
       }
     }
   })
+
+  private[rediculous] def closeReturn[F[_]: MonadError[*[_], Throwable], A](fE: F[Either[Resp, A]]): F[A] = 
+    fE.flatMap{
+        case Right(a) => a.pure[F]
+        case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
+        case Left(other) => ApplicativeError[F, Throwable].raiseError[A](new Throwable(s"Rediculous: Incompatible Return Type: Got $other"))
+      }
 
   def single[F[_]: Concurrent: ContextShift](sg: SocketGroup, address: InetSocketAddress): Resource[F, RedisConnection[F]] = 
     sg.client[F](address).map(RedisConnection.DirectConnection(_))
@@ -98,13 +122,14 @@ object RedisConnection{
   // Only allows 1k queued actions, before new actions block to be accepted.
   def queued[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, address: InetSocketAddress, maxQueued: Int = 1000, workers: Int = 2): Resource[F, RedisConnection[F]] = 
     for {
-      queue <- Resource.liftF(Queue.bounded[F, (Deferred[F, Either[Throwable,Resp]], Resp)](maxQueued))
+      queue <- Resource.liftF(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Resp)]](maxQueued))
       keypool <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
         {_ => sg.client[F](address).allocated},
         { case (_, shutdown) => shutdown}
       ).build
       _ <- 
-          queue.dequeue.chunks.map{chunk => 
+          queue.dequeue.chunks.map{chunkChunk =>
+            val chunk = chunkChunk.flatten
             if (chunk.nonEmpty) {
                 Stream.eval(keypool.map(_._1).take(()).use{m =>
                   val out = chunk.map(_._2)
@@ -130,5 +155,5 @@ object RedisConnection{
           .compile
           .drain
           .background
-    } yield Queued(queue)
+    } yield Queued(queue, keypool.take(()).map(_.map(_._1)))
 }

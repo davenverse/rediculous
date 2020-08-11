@@ -119,12 +119,12 @@ object RedisCommands {
     val default = SetOpts(None, None, None, false)
   }
 
-  def set[F[_]: Concurrent](key: String, value: String, setOpts: SetOpts = SetOpts.default): Redis[F, Status] = {
+  def set[F[_]: RedisCtx](key: String, value: String, setOpts: SetOpts = SetOpts.default): F[Status] = {
     val ex = setOpts.setSeconds.toList.flatMap(l => List("EX", l.encode))
     val px = setOpts.setMilliseconds.toList.flatMap(l => List("PX", l.encode))
     val condition = setOpts.setCondition.toList.map(_.encode)
     val keepTTL = Alternative[List].guard(setOpts.keepTTL).as("KEEPTTL")
-    runRequestTotal(NEL("SET", key.encode :: value.encode :: ex ::: px ::: condition ::: keepTTL))
+    RedisCtx[F].run(NEL("SET", key.encode :: value.encode :: ex ::: px ::: condition ::: keepTTL))
   }
 
   final case class ZAddOpts(
@@ -219,8 +219,8 @@ object RedisCommands {
 
   // Simple String Commands
 
-  def ping[F[_]: Concurrent]: Redis[F, Status] =
-    runRequestTotal[F, Status](NEL.of("PING"))
+  def ping[F[_]: RedisCtx]: F[Status] =
+    RedisCtx[F].run[Status](NEL.of("PING"))
 
   def ttl[F[_]: Concurrent](key: String): Redis[F, Long] = 
     runRequestTotal[F, Long](NEL.of("TTL", key.encode))
@@ -396,8 +396,8 @@ object RedisCommands {
   def sdiff[F[_]: Concurrent](key: List[String]): Redis[F, List[String]] = 
     runRequestTotal(NEL("SDIFF", key.map(_.encode)))
 
-  def get[F[_]: Concurrent](key: String): Redis[F, Option[String]] = 
-    runRequestTotal(NEL.of("GET", key.encode))
+  def get[F[_]: RedisCtx](key: String): F[Option[String]] = 
+    RedisCtx[F].run(NEL.of("GET", key.encode))
 
   def getrange[F[_]: Concurrent](key: String, start: Long, end: Long): Redis[F, String] = 
     runRequestTotal(NEL.of("GETRANGE", key.encode, start.encode, end.encode))

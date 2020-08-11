@@ -1,6 +1,7 @@
 package io.chrisdavenport.rediculous
 
 import scala.collection.mutable
+import cats.data.NonEmptyList
 import cats.implicits._
 import scala.util.control.NonFatal
 import java.nio.charset.StandardCharsets
@@ -24,6 +25,16 @@ object Resp {
   private[Resp] val MinusOne = "-1".getBytes()
 
   private[Resp] val CRLF = "\r\n".getBytes
+
+  def renderRequest(nel: NonEmptyList[String]): Resp = {
+    Resp.Array(Some(
+      nel.toList.map(renderArg)
+    ))
+  }
+
+  def renderArg(arg: String): Resp = {
+    Resp.BulkString(Some(arg))
+  }
 
   def encode(resp: Resp): SArray[Byte] = {
     resp match {
