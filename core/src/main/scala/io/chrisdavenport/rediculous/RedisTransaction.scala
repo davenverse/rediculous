@@ -9,30 +9,33 @@ import RedisProtocol._
 
 object RedisTransaction {
 
-  final case class TxQueued[A](value: RedisTx[Queued[A]])
-  object TxQueued {
-    implicit val ctx: RedisCtx[TxQueued] =  new RedisCtx[TxQueued]{
-      def run[A: RedisResult](command: NonEmptyList[String]): TxQueued[A] = TxQueued(RedisTx{for {
+  final case class Transaction[A](value: RedisTxState[Queued[A]]){
+    def transact[F[_]: Concurrent]: Redis[F, TxResult[A]] = 
+      multiExec[F](this)
+  }
+  object Transaction {
+    implicit val ctx: RedisCtx[Transaction] =  new RedisCtx[Transaction]{
+      def run[A: RedisResult](command: NonEmptyList[String]): Transaction[A] = Transaction(RedisTxState{for {
         (i, base) <- State.get
         _ <- State.set((i + 1, base ++ List(command)))
       } yield Queued(l => RedisResult[A].decode(l(i)))})
     }
-    implicit val applicative: Applicative[TxQueued] = new Applicative[TxQueued]{
-      def pure[A](a: A) = TxQueued(Monad[RedisTx].pure(Monad[Queued].pure(a)))
+    implicit val applicative: Applicative[Transaction] = new Applicative[Transaction]{
+      def pure[A](a: A) = Transaction(Monad[RedisTxState].pure(Monad[Queued].pure(a)))
 
-      override def ap[A, B](ff: TxQueued[A => B])(fa: TxQueued[A]): TxQueued[B] =
-        TxQueued(RedisTx(
+      override def ap[A, B](ff: Transaction[A => B])(fa: Transaction[A]): Transaction[B] =
+        Transaction(RedisTxState(
           Nested(ff.value.value).ap(Nested(fa.value.value)).value
         ))
     }
   }
 
-  final case class RedisTx[A](value: State[(Int, List[NonEmptyList[String]]), A])
-  object RedisTx {
+  final case class RedisTxState[A](value: State[(Int, List[NonEmptyList[String]]), A])
+  object RedisTxState {
 
-    implicit val m: Monad[RedisTx] = new StackSafeMonad[RedisTx]{
-      def pure[A](a: A): RedisTx[A] = RedisTx(Monad[State[(Int, List[NonEmptyList[String]]), *]].pure(a))
-      def flatMap[A, B](fa: RedisTx[A])(f: A => RedisTx[B]): RedisTx[B] = RedisTx(
+    implicit val m: Monad[RedisTxState] = new StackSafeMonad[RedisTxState]{
+      def pure[A](a: A): RedisTxState[A] = RedisTxState(Monad[State[(Int, List[NonEmptyList[String]]), *]].pure(a))
+      def flatMap[A, B](fa: RedisTxState[A])(f: A => RedisTxState[B]): RedisTxState[B] = RedisTxState(
         fa.value.flatMap(f.andThen(_.value))
       )
     }
@@ -69,7 +72,7 @@ object RedisTransaction {
   
   class MultiExecPartiallyApplied[F[_]]{
 
-    def apply[A](tx: TxQueued[A])(implicit F: Concurrent[F]): Redis[F, TxResult[A]] = {
+    def apply[A](tx: Transaction[A])(implicit F: Concurrent[F]): Redis[F, TxResult[A]] = {
       Redis(Kleisli{c: RedisConnection[F] => 
         val ((_, commands), Queued(f)) = tx.value.value.run((0, List.empty)).value
         RedisConnection.runRequestInternal(c)(NonEmptyList(

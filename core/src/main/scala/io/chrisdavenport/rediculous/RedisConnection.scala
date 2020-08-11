@@ -28,7 +28,7 @@ object RedisConnection{
     def getTillEqualSize(acc: List[List[Resp]], lastArr: Array[Byte]): F[List[Resp]] = 
     socket.read(maxBytes, timeout).flatMap{
       case None => 
-        ApplicativeError[F, Throwable].raiseError[List[Resp]](new Throwable("Terminated Before reaching Equal size"))
+        ApplicativeError[F, Throwable].raiseError[List[Resp]](new Throwable("Rediculous: Terminated Before reaching Equal size"))
       case Some(bytes) => 
         Resp.parseAll(lastArr.toArray ++ bytes.toArray.toIterable) match {
           case e@Resp.ParseError(_, _) => ApplicativeError[F, Throwable].raiseError[List[Resp]](e)
@@ -53,7 +53,7 @@ object RedisConnection{
   def runRequestInternal[F[_]: Concurrent](connection: RedisConnection[F])(
     inputs: NonEmptyList[NonEmptyList[String]]): F[F[NonEmptyList[Resp]]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
-      def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => Sync[F].delay(l.toNel.get))
+      def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => Sync[F].delay(l.toNel.getOrElse(throw new Throwable("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))))
       connection match {
       case PooledConnection(pool) => pool.map(_._1).take(()).use{
         m => withSocket(m.value).attempt.flatTap{
@@ -64,7 +64,7 @@ object RedisConnection{
       case DirectConnection(socket) => withSocket(socket).map(_.pure[F])
       case Queued(queue, _) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map((_, resp))).flatMap{ c => 
         queue.enqueue1(c).as {
-          c.traverse(_._1.get).flatMap(_.sequence.traverse(l => Sync[F].delay(l.toNel.get))).rethrow
+          c.traverse(_._1.get).flatMap(_.sequence.traverse(l => Sync[F].delay(l.toNel.getOrElse(throw new Throwable("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))))).rethrow
         }   
       }
     }

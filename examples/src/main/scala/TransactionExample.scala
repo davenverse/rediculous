@@ -19,13 +19,14 @@ object TransactionExample extends IOApp {
 
     r.use {client =>
       val r = (
-        RedisCommands.ping[RedisTransaction.TxQueued],
-        RedisCommands.get[RedisTransaction.TxQueued]("foo"),
-        RedisCommands.set[RedisTransaction.TxQueued]("foo", "value"),
-        RedisCommands.get[RedisTransaction.TxQueued]("foo")
+        RedisCommands.ping[RedisTransaction.Transaction],
+        RedisCommands.del[RedisTransaction.Transaction](List("foo")),
+        RedisCommands.get[RedisTransaction.Transaction]("foo"),
+        RedisCommands.set[RedisTransaction.Transaction]("foo", "value"),
+        RedisCommands.get[RedisTransaction.Transaction]("foo")
       ).tupled
 
-      val multi = RedisTransaction.multiExec[IO](r)
+      val multi = r.transact[IO]
 
       multi.run(client).flatTap(output => IO(println(output)))
 
