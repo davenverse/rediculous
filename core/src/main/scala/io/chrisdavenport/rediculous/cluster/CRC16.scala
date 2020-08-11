@@ -16,14 +16,14 @@ import java.nio.charset.StandardCharsets
   * Output for "123456789"     : 31C3
   */
 object CRC16 {
-  // TODO confirm unsigned behavior matches
+  
   def apply(string: String)(implicit C: Charset = StandardCharsets.UTF_8): Int = {
     val base =  string.getBytes(C)
     var crc: Int = 0
-    base.foreach{ b => // Step Through Bytes
-      crc = (crc << 8 ) ^ table(((crc >> 8) ^ b) & 0xff)
+    base.foreach{ b =>
+      crc = (crc << 8 ) ^ table(((crc >>> 8) ^ (b & 0xff)) & 0xff)
     }
-    val a = crc
+    val a = crc & 0xFFFF
     a
   }
 
