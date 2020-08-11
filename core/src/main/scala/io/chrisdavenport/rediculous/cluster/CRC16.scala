@@ -17,14 +17,13 @@ import java.nio.charset.StandardCharsets
   */
 object CRC16 {
   
-  def apply(string: String)(implicit C: Charset = StandardCharsets.UTF_8): Int = {
+  def string(string: String)(implicit C: Charset = StandardCharsets.UTF_8): Int = {
     val base =  string.getBytes(C)
     var crc: Int = 0
     base.foreach{ b =>
-      crc = (crc << 8 ) ^ table(((crc >>> 8) ^ (b & 0xff)) & 0xff)
+      crc = (crc << 8) ^ table(((crc >>> 8) ^ (b & 0xff)) & 0xff)
     }
-    val a = crc & 0xFFFF
-    a
+    crc & 0xFFFF
   }
 
   private[CRC16] lazy val table : Array[Int] = Array(
