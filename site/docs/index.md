@@ -45,10 +45,10 @@ object BasicExample extends IOApp {
 
     r.use {client =>
       val r = (
-        RedisCommands.ping[IO],
-        RedisCommands.get[IO]("foo"),
-        RedisCommands.set[IO]("foo", "value"),
-        RedisCommands.get[IO]("foo")
+        RedisCommands.ping[Redis[IO, *]],
+        RedisCommands.get[Redis[IO, *]]("foo"),
+        RedisCommands.set[Redis[IO, *]]("foo", "value"),
+        RedisCommands.get[Redis[IO, *]]("foo")
       ).parTupled
 
       val r2= List.fill(10)(r.run(client)).parSequence.map{_.flatMap{
