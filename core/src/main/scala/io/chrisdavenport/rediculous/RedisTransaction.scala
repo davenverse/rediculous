@@ -9,7 +9,7 @@ import RedisProtocol._
 
 object RedisTransaction {
 
-  case class TxQueued[A](value: RedisTx[Queued[A]])
+  final case class TxQueued[A](value: RedisTx[Queued[A]])
   object TxQueued {
     implicit val ctx: RedisCtx[TxQueued] =  new RedisCtx[TxQueued]{
       def run[A: RedisResult](command: NonEmptyList[String]): TxQueued[A] = TxQueued(RedisTx{for {
@@ -17,22 +17,17 @@ object RedisTransaction {
         _ <- State.set((i + 1, base ++ List(command)))
       } yield Queued(l => RedisResult[A].decode(l(i)))})
     }
-    // implicit val monad: Monad[TxQueued] = new StackSafeMonad[TxQueued]{
-    //   def pure[A](a: A) = TxQueued(Monad[RedisTx].pure(Monad[Queued].pure(a)))
+    implicit val applicative: Applicative[TxQueued] = new Applicative[TxQueued]{
+      def pure[A](a: A) = TxQueued(Monad[RedisTx].pure(Monad[Queued].pure(a)))
 
-    //   def flatMap[A, B](fa: TxQueued[A])(f: A => TxQueued[B]): TxQueued[B] = ???
-    //   //  TxQueued(RedisTx(State{s: (Int, List[NonEmptyList[String]]) => 
-    //   //   fa.value.value.run(s).flatMap{
-    //   //     case ((i, l), a) => 
-    //   //       val e: Eval[((Int, List[NonEmptyList[String]]), Queued[B])] = f(a).value.value.run((i, l))
-    //   //   }
-
-    //   // }))
-      
-    // }
+      override def ap[A, B](ff: TxQueued[A => B])(fa: TxQueued[A]): TxQueued[B] =
+        TxQueued(RedisTx(
+          Nested(ff.value.value).ap(Nested(fa.value.value)).value
+        ))
+    }
   }
 
-  case class RedisTx[A](value: State[(Int, List[NonEmptyList[String]]), A])
+  final case class RedisTx[A](value: State[(Int, List[NonEmptyList[String]]), A])
   object RedisTx {
 
     implicit val m: Monad[RedisTx] = new StackSafeMonad[RedisTx]{
@@ -42,7 +37,7 @@ object RedisTransaction {
       )
     }
   }
-  case class Queued[A](f: List[Resp] => Either[Resp, A])
+  final case class Queued[A](f: List[Resp] => Either[Resp, A])
   object Queued {
     implicit val m: Monad[Queued] = new StackSafeMonad[Queued]{
       def pure[A](a: A) = Queued{_ => Either.right(a)}

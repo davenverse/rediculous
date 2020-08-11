@@ -53,7 +53,7 @@ object RedisConnection{
   def runRequestInternal[F[_]: Concurrent](connection: RedisConnection[F])(
     inputs: NonEmptyList[NonEmptyList[String]]): F[F[NonEmptyList[Resp]]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
-      def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => Sync[F].delay(l.toNel.get)) // TODO Option.get
+      def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => Sync[F].delay(l.toNel.get))
       connection match {
       case PooledConnection(pool) => pool.map(_._1).take(()).use{
         m => withSocket(m.value).attempt.flatTap{
@@ -64,34 +64,15 @@ object RedisConnection{
       case DirectConnection(socket) => withSocket(socket).map(_.pure[F])
       case Queued(queue, _) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map((_, resp))).flatMap{ c => 
         queue.enqueue1(c).as {
-          c.traverse(_._1.get).flatMap(_.sequence.traverse(l => Sync[F].delay(l.toNel.get))).rethrow // TODO Option GET
+          c.traverse(_._1.get).flatMap(_.sequence.traverse(l => Sync[F].delay(l.toNel.get))).rethrow
         }   
       }
-
     }
   }
 
   // Can Be used to implement any low level protocols.
   def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String]): F[F[Either[Resp, A]]] = 
     runRequestInternal(connection)(NonEmptyList.of(input)).map(_.map(nel => RedisResult[A].decode(nel.head)))
-  // {
-  //   val resp = Resp.renderRequest(input)
-  //   def withSocket(socket: Socket[F]): F[Resp] = explicitPipelineRequest[F](socket, Chunk.singleton(resp)).map(_.head)
-  //   connection match {
-  //     case PooledConnection(pool) => pool.map(_._1).take(()).use{
-  //       m => withSocket(m.value).attempt.flatTap{
-  //         case Left(_) => m.canBeReused.set(Reusable.DontReuse)
-  //         case _ => Applicative[F].unit
-  //       }
-  //     }.rethrow.map(RedisResult[A].decode).map(_.pure[F])
-  //     case DirectConnection(socket) => withSocket(socket).map(RedisResult[A].decode).map(_.pure[F])
-  //     case Queued(queue, _) => Deferred[F, Either[Throwable, Resp]].flatMap{d => 
-  //       queue.enqueue1(Chunk.singleton((d, resp))).as {
-  //         d.get.rethrow.map(RedisResult[A].decode)
-  //       }   
-  //     }
-  //   }
-  // }
 
   def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String]): Redis[F, A] = Redis(Kleisli{connection: RedisConnection[F] => 
     runRequest(connection)(input).map{ fE => 

@@ -24,17 +24,14 @@ object BasicExample extends IOApp {
 
     r.use {client =>
       val r = (
-        RedisCommands.ping[RedisTransaction.TxQueued],
-        RedisCommands.get[RedisTransaction.TxQueued]("foo"),
-        RedisCommands.set[RedisTransaction.TxQueued]("foo", "value"),
-        RedisCommands.get[RedisTransaction.TxQueued]("foo")
-      ).tupled
+        RedisCommands.ping[Redis[IO, *]],
+        RedisCommands.get[Redis[IO, *]]("foo"),
+        RedisCommands.set[Redis[IO, *]]("foo", "value"),
+        RedisCommands.get[Redis[IO, *]]("foo")
+      ).parTupled
 
-      val multi = RedisTransaction.multiExec[IO](r)
-
-      val r2= List.fill(10)(multi.run(client)).parSequence.map{_.flatMap{
-        case RedisTransaction.TxResult.Success((_,_,_,_)) => List((), (), (), ())
-        case e => println(s"Unexpected $e"); List()
+      val r2= List.fill(10)(r.run(client)).parSequence.map{_.flatMap{
+        case (_,_,_,_) => List((), (), (), ())
       }}
 
       val now = IO(java.time.Instant.now)
