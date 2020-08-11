@@ -111,7 +111,7 @@ object RedisConnection{
       _ <- 
           queue.dequeue.chunks.map{chunkChunk =>
             val chunk = chunkChunk.flatten
-            if (chunk.nonEmpty) {
+            val s = if (chunk.nonEmpty) {
                 Stream.eval(keypool.map(_._1).take(()).use{m =>
                   val out = chunk.map(_._2)
                   explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
@@ -127,11 +127,11 @@ object RedisConnection{
                     }
                   case e@Left(_) => 
                     chunk.traverse_{ case (deff, _) => deff.complete(e.asInstanceOf[Either[Throwable, Resp]])}
-                }) ++ Stream.eval_(ContextShift[F].shift)
+                }) 
             } else {
               Stream.empty
             }
-          
+            s ++ Stream.eval_(ContextShift[F].shift)
           }.parJoin(workers) // Worker Threads
           .compile
           .drain

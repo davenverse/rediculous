@@ -7,27 +7,62 @@ import cats.effect._
 import RedisProtocol._
 
 
+/**
+ * Transactions Operate via typeclasses. RedisCtx allows us to abstract our operations into
+ * different types depending on the behavior we want. In the case of transactions that is 
+ * [[RedisTransaction]]. These can be composed together via its Applicative
+ * instance to form a transaction consisting of multiple commands, then transacted via
+ * either multiExec or transact on the class.
+ * 
+ * @example 
+ * {{{
+ * import io.chrisdavenport.rediculous._
+ * import cats.effect.Concurrent
+ * val tx = (
+ *   RedisCommands.ping[RedisTransaction],
+ *   RedisCommands.del[RedisTransaction](List("foo")),
+ *   RedisCommands.get[RedisTransaction]("foo"),
+ *   RedisCommands.set[RedisTransaction]("foo", "value"),
+ *   RedisCommands.get[RedisTransaction]("foo")
+ * ).tupled
+ * 
+ * def operation[F[_]: Concurrent] = tx.transact[F]
+ * }}}
+ **/
+final case class RedisTransaction[A](value: RedisTransaction.RedisTxState[RedisTransaction.Queued[A]]){
+  def transact[F[_]: Concurrent]: Redis[F, RedisTransaction.TxResult[A]] = 
+    RedisTransaction.multiExec[F](this)
+}
+
 object RedisTransaction {
 
-  final case class Transaction[A](value: RedisTxState[Queued[A]]){
-    def transact[F[_]: Concurrent]: Redis[F, TxResult[A]] = 
-      multiExec[F](this)
+  implicit val ctx: RedisCtx[RedisTransaction] =  new RedisCtx[RedisTransaction]{
+    def run[A: RedisResult](command: NonEmptyList[String]): RedisTransaction[A] = RedisTransaction(RedisTxState{for {
+      (i, base) <- State.get
+      _ <- State.set((i + 1, command :: base))
+    } yield Queued(l => RedisResult[A].decode(l(i)))})
   }
-  object Transaction {
-    implicit val ctx: RedisCtx[Transaction] =  new RedisCtx[Transaction]{
-      def run[A: RedisResult](command: NonEmptyList[String]): Transaction[A] = Transaction(RedisTxState{for {
-        (i, base) <- State.get
-        _ <- State.set((i + 1, base ++ List(command)))
-      } yield Queued(l => RedisResult[A].decode(l(i)))})
-    }
-    implicit val applicative: Applicative[Transaction] = new Applicative[Transaction]{
-      def pure[A](a: A) = Transaction(Monad[RedisTxState].pure(Monad[Queued].pure(a)))
+  implicit val applicative: Applicative[RedisTransaction] = new Applicative[RedisTransaction]{
+    def pure[A](a: A) = RedisTransaction(Monad[RedisTxState].pure(Monad[Queued].pure(a)))
 
-      override def ap[A, B](ff: Transaction[A => B])(fa: Transaction[A]): Transaction[B] =
-        Transaction(RedisTxState(
-          Nested(ff.value.value).ap(Nested(fa.value.value)).value
-        ))
-    }
+    override def ap[A, B](ff: RedisTransaction[A => B])(fa: RedisTransaction[A]): RedisTransaction[B] =
+      RedisTransaction(RedisTxState(
+        Nested(ff.value.value).ap(Nested(fa.value.value)).value
+      ))
+  }
+
+  /**
+    * A TxResult Represent the state of a RedisTransaction when run.
+    * Success means it completed succesfully, Aborted means we received
+    * a Nil Arrary from Redis which represent that at least one key being watched
+    * has been modified. An error occurs depending on the succesful execution of
+    * the function built in Queued.
+    */
+  sealed trait TxResult[+A]
+  object TxResult {
+    final case class Success[A](value: A) extends TxResult[A]
+    final case object Aborted extends TxResult[Nothing]
+    final case class Error(value: String) extends TxResult[Nothing]
   }
 
   final case class RedisTxState[A](value: State[(Int, List[NonEmptyList[String]]), A])
@@ -55,13 +90,9 @@ object RedisTransaction {
     }
   }
 
-  sealed trait TxResult[+A]
-  object TxResult {
-    final case class Success[A](value: A) extends TxResult[A]
-    final case object Aborted extends TxResult[Nothing]
-    final case class Error(value: String) extends TxResult[Nothing]
-  }
-
+  // ----------
+  // Operations
+  // ----------
   def watch[F[_]: Concurrent](keys: List[String]): Redis[F, Status] = 
     RedisCtx[Redis[F,*]].run(NonEmptyList("WATCH", keys))
 
@@ -72,9 +103,10 @@ object RedisTransaction {
   
   class MultiExecPartiallyApplied[F[_]]{
 
-    def apply[A](tx: Transaction[A])(implicit F: Concurrent[F]): Redis[F, TxResult[A]] = {
+    def apply[A](tx: RedisTransaction[A])(implicit F: Concurrent[F]): Redis[F, TxResult[A]] = {
       Redis(Kleisli{c: RedisConnection[F] => 
-        val ((_, commands), Queued(f)) = tx.value.value.run((0, List.empty)).value
+        val ((_, commandsR), Queued(f)) = tx.value.value.run((0, List.empty)).value
+        val commands = commandsR.reverse
         RedisConnection.runRequestInternal(c)(NonEmptyList(
           NonEmptyList.of("MULTI"),
           commands ++ 

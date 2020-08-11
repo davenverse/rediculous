@@ -19,11 +19,11 @@ object TransactionExample extends IOApp {
 
     r.use {client =>
       val r = (
-        RedisCommands.ping[RedisTransaction.Transaction],
-        RedisCommands.del[RedisTransaction.Transaction](List("foo")),
-        RedisCommands.get[RedisTransaction.Transaction]("foo"),
-        RedisCommands.set[RedisTransaction.Transaction]("foo", "value"),
-        RedisCommands.get[RedisTransaction.Transaction]("foo")
+        RedisCommands.ping[RedisTransaction],
+        RedisCommands.del[RedisTransaction](List("foo")),
+        RedisCommands.get[RedisTransaction]("foo"),
+        RedisCommands.set[RedisTransaction]("foo", "value"),
+        RedisCommands.get[RedisTransaction]("foo")
       ).tupled
 
       val multi = r.transact[IO]
