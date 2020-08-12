@@ -167,10 +167,9 @@ object RedisConnection{
               Stream.eval(refTopology.get).map{topo => 
                 Stream.eval(topo.random[F]).flatMap{ default => 
                 Stream.emits(
-                    chunk.toList.groupBy{ case (_, s, _) => 
+                    chunk.toList.groupBy{ case (_, s, _) => // TODO Investigate Efficient Group By
                     s.flatMap(key => topo.served(HashSlot.find(key))).getOrElse(default)
-                    
-                  }.toList
+                  }.toSeq
                 ).evalMap{
                   case (server, rest) => 
                     keypool.map(_._1).take(server).use{m =>
