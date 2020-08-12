@@ -44,7 +44,7 @@ object ClusterCommands {
       } else None
     }.flatMap{
       case Some(a) => Sync[F].pure(a)
-      case None => Sync[F].raiseError[(String, Int)](new Throwable("Rediculous: No Servers Available"))
+      case None => Sync[F].raiseError[(String, Int)](RedisError.Generic("Rediculous: No Servers Available"))
     }
   }
   object ClusterSlots {

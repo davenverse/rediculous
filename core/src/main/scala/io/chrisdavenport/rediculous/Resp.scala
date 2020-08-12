@@ -13,7 +13,7 @@ object Resp {
   sealed trait RespParserResult[+A]
   final case class ParseComplete[A](value: A, rest: SArray[Byte]) extends RespParserResult[A]
   final case class ParseIncomplete(arr: SArray[Byte]) extends RespParserResult[Nothing]
-  final case class ParseError(message: String, cause: Option[Throwable]) extends Throwable(message, cause.orNull) with RespParserResult[Nothing]
+  final case class ParseError(message: String, cause: Option[Throwable]) extends RedisError with RespParserResult[Nothing]
   private[Resp] val CR = '\r'.toByte
   private[Resp] val LF = '\n'.toByte
   private[Resp] val Plus = '+'.toByte
@@ -104,7 +104,10 @@ object Resp {
     }
   }
   // First Byte is -
-  case class Error(value: String) extends Throwable(s"Resp Error- $value") with Resp
+  case class Error(value: String) extends RedisError with Resp{
+    def message: String = s"Resp Error- $value"
+    val cause: Option[Throwable] = None
+  }
   object Error {
     def encode(error: Error): SArray[Byte] = 
       SArray(Minus) ++ error.value.getBytes(StandardCharsets.UTF_8) ++ CRLF

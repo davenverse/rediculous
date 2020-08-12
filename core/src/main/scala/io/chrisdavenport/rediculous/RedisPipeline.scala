@@ -11,7 +11,8 @@ import cats.effect._
  * ClusterMode: Multi Key Operations Will use for the first key
  * provided.
  * 
- * [[pipeline]] method converts the Pipeline state to the Redis Monad.
+ * [[pipeline]] method converts the Pipeline state to the Redis Monad. This will error
+ * if you pipeline and have not actually enterred any redis commands.
  **/
 final case class RedisPipeline[A](value: RedisTransaction.RedisTxState[RedisTransaction.Queued[A]]){
   def pipeline[F[_]: Concurrent]: Redis[F, A] = RedisPipeline.pipeline[F](this)
@@ -60,7 +61,7 @@ object RedisPipeline {
         commands.traverse(nelCommands => RedisConnection.runRequestInternal(c)(nelCommands, key) // We Have to Actually Send A Command
           .map{fNel => RedisConnection.closeReturn(fNel.map(a => f(a.toList)))}
         ).flatMap{fOpt => 
-          fOpt.map(_.pure[F]).getOrElse(F.raiseError(new Throwable("Rediculous: Attempted to Pipeline Empty Command")))
+          fOpt.map(_.pure[F]).getOrElse(F.raiseError(RedisError.Generic("Rediculous: Attempted to Pipeline Empty Command")))
         }
       })
     }
