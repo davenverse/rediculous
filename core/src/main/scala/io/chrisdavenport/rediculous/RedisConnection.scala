@@ -14,7 +14,8 @@ import java.net.InetSocketAddress
 import scala.concurrent.duration._
 import _root_.io.chrisdavenport.rediculous.cluster.HashSlot
 import _root_.io.chrisdavenport.rediculous.cluster.ClusterCommands
-
+import fs2.io.tls.TLSContext
+import fs2.io.tls.TLSParameters
 
 sealed trait RedisConnection[F[_]]
 object RedisConnection{
@@ -102,23 +103,47 @@ object RedisConnection{
         case Left(other) => ApplicativeError[F, Throwable].raiseError[A](new Throwable(s"Rediculous: Incompatible Return Type: Got $other"))
       }
 
-  def single[F[_]: Concurrent: ContextShift](sg: SocketGroup, host: String , port: Int): Resource[F, RedisConnection[F]] = 
+  def single[F[_]: Concurrent: ContextShift](
+    sg: SocketGroup,
+    host: String,
+    port: Int,
+    tlsContext: Option[TLSContext] = None,
+    tlsParameters: TLSParameters = TLSParameters.Default
+  ): Resource[F, RedisConnection[F]] = 
     for {
       socket <- sg.client[F](new InetSocketAddress(host, port))
-    } yield RedisConnection.DirectConnection(socket)
+      out <- elevateSocket(socket, tlsContext, tlsParameters)
+    } yield RedisConnection.DirectConnection(out)
 
-  def pool[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, host: String, port: Int): Resource[F, RedisConnection[F]] = 
+  def pool[F[_]: Concurrent: Timer: ContextShift](
+    sg: SocketGroup,
+    host: String,
+    port: Int,
+    tlsContext: Option[TLSContext] = None,
+    tlsParameters: TLSParameters = TLSParameters.Default
+  ): Resource[F, RedisConnection[F]] = 
     KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
-      {_ => sg.client[F](new InetSocketAddress(host, port)).allocated},
+      {_ => sg.client[F](new InetSocketAddress(host, port)).flatMap(elevateSocket(_, tlsContext, tlsParameters)).allocated},
       { case (_, shutdown) => shutdown}
     ).build.map(PooledConnection[F](_))
 
   // Only allows 1k queued actions, before new actions block to be accepted.
-  def queued[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, host: String, port: Int, maxQueued: Int = 10000, workers: Int = 2): Resource[F, RedisConnection[F]] = 
+  def queued[F[_]: Concurrent: Timer: ContextShift](
+    sg: SocketGroup,
+    host: String,
+    port: Int,
+    maxQueued: Int = 10000,
+    workers: Int = 2,
+    tlsContext: Option[TLSContext] = None,
+    tlsParameters: TLSParameters = TLSParameters.Default
+  ): Resource[F, RedisConnection[F]] = 
     for {
       queue <- Resource.liftF(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Resp)]](maxQueued))
       keypool <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
-        {_ => sg.client[F](new InetSocketAddress(host, port)).allocated},
+        {_ => sg.client[F](new InetSocketAddress(host, port))
+          .flatMap(elevateSocket(_, tlsContext, tlsParameters))
+          .allocated
+        },
         { case (_, shutdown) => shutdown}
       ).build
       _ <- 
@@ -151,10 +176,22 @@ object RedisConnection{
           .background
     } yield Queued(queue, keypool.take(()).map(_.map(_._1)))
 
-  def cluster[F[_]: Concurrent: Parallel: Timer: ContextShift](sg: SocketGroup, host: String, port: Int, maxQueued: Int = 10000, workers: Int = 2, parallelServerCalls: Int = Int.MaxValue): Resource[F, RedisConnection[F]] = 
+  def cluster[F[_]: Concurrent: Parallel: Timer: ContextShift](
+    sg: SocketGroup,
+    host: String,
+    port: Int,
+    maxQueued: Int = 10000,
+    workers: Int = 2,
+    parallelServerCalls: Int = Int.MaxValue,
+    tlsContext: Option[TLSContext] = None,
+    tlsParameters: TLSParameters = TLSParameters.Default
+  ): Resource[F, RedisConnection[F]] = 
     for {
       keypool <- KeyPoolBuilder[F, (String, Int), (Socket[F], F[Unit])](
-        {t: (String, Int) => sg.client[F](new InetSocketAddress(t._1, t._2)).allocated},
+        {t: (String, Int) => sg.client[F](new InetSocketAddress(t._1, t._2))
+            .flatMap(elevateSocket(_, tlsContext, tlsParameters))
+            .allocated
+        },
         { case (_, shutdown) => shutdown}
       ).build
       sockets <- Resource.liftF(keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_)))
@@ -213,6 +250,9 @@ object RedisConnection{
             .drain
             .background
     } yield cluster
+
+  private def elevateSocket[F[_]: Concurrent: ContextShift](socket: Socket[F], tlsContext: Option[TLSContext], tlsParameters: TLSParameters): Resource[F, Socket[F]] = 
+    tlsContext.fold(Resource.pure[F, Socket[F]](socket))(c => c.client(socket, tlsParameters))
 
   // ASK 1234-2020 127.0.0.1:6381
   // MOVED 1234-2020 127.0.0.1:6381
