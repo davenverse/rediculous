@@ -125,7 +125,7 @@ object RedisTransaction {
         ), key).map{_.flatMap{_.last match {
           case Resp.Array(Some(a)) => f(a).fold[TxResult[A]](e => TxResult.Error(e.toString), TxResult.Success(_)).pure[F]
           case Resp.Array(None) => (TxResult.Aborted: TxResult[A]).pure[F]
-          case other => ApplicativeError[F, Throwable].raiseError(new Throwable(s"EXEC returned $other"))
+          case other => ApplicativeError[F, Throwable].raiseError(RedisError.Generic(s"EXEC returned $other"))
         }}}
       })
     }
