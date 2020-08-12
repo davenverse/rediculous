@@ -1,36 +1,35 @@
-
 import io.chrisdavenport.rediculous._
 import cats.implicits._
 import cats.effect._
+import fs2.Stream
 import fs2.io.tcp._
-import fs2._
 import scala.concurrent.duration._
 
-// Mimics 150 req/s load with 4 operations per request.
-// Completes 1,000,000 redis operations
-// Completes in <5 s
-object BasicExample extends IOApp {
+// Send a Single Transaction to the Redis Server
+object ClusterExample extends IOApp {
 
   def run(args: List[String]): IO[ExitCode] = {
     val r = for {
       blocker <- Blocker[IO]
       sg <- SocketGroup[IO](blocker)
-      // maxQueued: How many elements before new submissions semantically block. Tradeoff of memory to queue jobs. 
+      // maxQueued: How many elements before new submissions semantically block.
       // Default 1000 is good for small servers. But can easily take 100,000.
-      // workers: How many threads will process pipelined messages.
-      connection <- RedisConnection.queued[IO](sg, "localhost", 6379, maxQueued = 10000, workers = 2)
+      connection <- RedisConnection.cluster[IO](sg, "localhost", 30001, maxQueued = 10000)
     } yield connection
 
     r.use {client =>
-      val r = (
+      def keyed(key: String) = (
         RedisCommands.ping[Redis[IO, *]],
-        RedisCommands.get[Redis[IO, *]]("foo"),
-        RedisCommands.set[Redis[IO, *]]("foo", "value"),
-        RedisCommands.get[Redis[IO, *]]("foo")
+        RedisCommands.del[Redis[IO, *]](key),
+        RedisCommands.get[Redis[IO, *]](key),
+        RedisCommands.set[Redis[IO, *]](key, "value"),
+        RedisCommands.get[Redis[IO, *]](key)
       ).parTupled
 
+      val r = (keyed("foo"), keyed("bar"), keyed("baz")).parTupled
+
       val r2= List.fill(10)(r.run(client)).parSequence.map{_.flatMap{
-        case (_,_,_,_) => List((), (), (), ())
+        case ((_,_,_,_, _), (_,_,_,_, _),(_,_,_,_, _)) => List((), (), (), (), (), (), (), (), (), (), (), (), (), (), ())
       }}
 
       val now = IO(java.time.Instant.now)
@@ -43,9 +42,7 @@ object BasicExample extends IOApp {
       }.flatMap{ duration => 
         IO(println(s"Operation took ${duration}"))
       }
-    } >>
-      IO.pure(ExitCode.Success)
-    
-  }
+    }.as(ExitCode.Success)
 
+  }
 }

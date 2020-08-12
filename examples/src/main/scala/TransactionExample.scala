@@ -2,7 +2,6 @@ import io.chrisdavenport.rediculous._
 import cats.implicits._
 import cats.effect._
 import fs2.io.tcp._
-import java.net.InetSocketAddress
 
 // Send a Single Transaction to the Redis Server
 object TransactionExample extends IOApp {
@@ -14,13 +13,13 @@ object TransactionExample extends IOApp {
       // maxQueued: How many elements before new submissions semantically block. Tradeoff of memory to queue jobs. 
       // Default 1000 is good for small servers. But can easily take 100,000.
       // workers: How many threads will process pipelined messages.
-      connection <- RedisConnection.queued[IO](sg, new InetSocketAddress("localhost", 6379), maxQueued = 10000, workers = 2)
+      connection <- RedisConnection.queued[IO](sg, "localhost", 6379, maxQueued = 10000, workers = 2)
     } yield connection
 
     r.use {client =>
       val r = (
         RedisCommands.ping[RedisTransaction],
-        RedisCommands.del[RedisTransaction](List("foo")),
+        RedisCommands.del[RedisTransaction]("foo"),
         RedisCommands.get[RedisTransaction]("foo"),
         RedisCommands.set[RedisTransaction]("foo", "value"),
         RedisCommands.get[RedisTransaction]("foo")
