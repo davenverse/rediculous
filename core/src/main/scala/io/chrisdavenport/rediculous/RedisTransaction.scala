@@ -14,6 +14,11 @@ import RedisProtocol._
  * instance to form a transaction consisting of multiple commands, then transacted via
  * either multiExec or transact on the class.
  * 
+ * In Cluster Mode the first key operation defines the node the entire Transaction will
+ * be sent to. Transactions are required to only operate on operations containing
+ * keys in the same keyslot, and users are required to hold this imperative or else
+ * redis will reject the transaction.
+ * 
  * @example 
  * {{{
  * import io.chrisdavenport.rediculous._

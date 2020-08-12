@@ -102,21 +102,23 @@ object RedisConnection{
         case Left(other) => ApplicativeError[F, Throwable].raiseError[A](new Throwable(s"Rediculous: Incompatible Return Type: Got $other"))
       }
 
-  def single[F[_]: Concurrent: ContextShift](sg: SocketGroup, address: InetSocketAddress): Resource[F, RedisConnection[F]] = 
-    sg.client[F](address).map(RedisConnection.DirectConnection(_))
+  def single[F[_]: Concurrent: ContextShift](sg: SocketGroup, host: String , port: Int): Resource[F, RedisConnection[F]] = 
+    for {
+      socket <- sg.client[F](new InetSocketAddress(host, port))
+    } yield RedisConnection.DirectConnection(socket)
 
-  def pool[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, address: InetSocketAddress): Resource[F, RedisConnection[F]] = 
+  def pool[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, host: String, port: Int): Resource[F, RedisConnection[F]] = 
     KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
-      {_ => sg.client[F](address).allocated},
+      {_ => sg.client[F](new InetSocketAddress(host, port)).allocated},
       { case (_, shutdown) => shutdown}
     ).build.map(PooledConnection[F](_))
 
   // Only allows 1k queued actions, before new actions block to be accepted.
-  def queued[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, address: InetSocketAddress, maxQueued: Int = 1000, workers: Int = 2): Resource[F, RedisConnection[F]] = 
+  def queued[F[_]: Concurrent: Timer: ContextShift](sg: SocketGroup, host: String, port: Int, maxQueued: Int = 10000, workers: Int = 2): Resource[F, RedisConnection[F]] = 
     for {
       queue <- Resource.liftF(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Resp)]](maxQueued))
       keypool <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
-        {_ => sg.client[F](address).allocated},
+        {_ => sg.client[F](new InetSocketAddress(host, port)).allocated},
         { case (_, shutdown) => shutdown}
       ).build
       _ <- 
@@ -149,15 +151,15 @@ object RedisConnection{
           .background
     } yield Queued(queue, keypool.take(()).map(_.map(_._1)))
 
-  def cluster[F[_]: Concurrent: Parallel: Timer: ContextShift](sg: SocketGroup, host: String, port: Int, maxQueued: Int = 10000): Resource[F, RedisConnection[F]] = 
+  def cluster[F[_]: Concurrent: Parallel: Timer: ContextShift](sg: SocketGroup, host: String, port: Int, maxQueued: Int = 10000, workers: Int = 2, parallelServerCalls: Int = Int.MaxValue): Resource[F, RedisConnection[F]] = 
     for {
-      sockets <- Resource.liftF(single(sg, new InetSocketAddress(host, port)).use(ClusterCommands.clusterslots[Redis[F, *]].unRedis.run(_).flatten))
-      refTopology <- Resource.liftF(Ref[F].of(sockets))
-      queue <- Resource.liftF(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Option[String], Option[(String, Int)], Int, Resp)]](maxQueued))
       keypool <- KeyPoolBuilder[F, (String, Int), (Socket[F], F[Unit])](
         {t: (String, Int) => sg.client[F](new InetSocketAddress(t._1, t._2)).allocated},
         { case (_, shutdown) => shutdown}
       ).build
+      sockets <- Resource.liftF(keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_)))
+      refTopology <- Resource.liftF(Ref[F].of(sockets))
+      queue <- Resource.liftF(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Option[String], Option[(String, Int)], Int, Resp)]](maxQueued))
       cluster = Cluster(queue.enqueue1)
       refreshTopology = ClusterCommands.clusterslots[Redis[F, *]].run(cluster).flatMap(refTopology.set)
       _ <- 
@@ -180,7 +182,7 @@ object RedisConnection{
                       }
                     }.flatMap{
                     case Right(n) => 
-                      n.zipWithIndex.parTraverseN(10){
+                      n.zipWithIndex.parTraverseN(10){ // Parallelized Due to Possible Holding Loops
                         case (ref, i) => 
                           val (toSet, key, server, retries, initialCommand) = rest(i)
                           ref match {
@@ -203,10 +205,10 @@ object RedisConnection{
                   }
 
                 }
-              }}.parJoinUnbounded // Send All Acquired values simultaneously. Should be mostly IO awaiting callback
+              }}.parJoin(parallelServerCalls) // Send All Acquired values simultaneously. Should be mostly IO awaiting callback
             } else Stream.empty
             s ++ Stream.eval_(ContextShift[F].shift)
-          }.parJoin(2)
+          }.parJoin(workers)
             .compile
             .drain
             .background
