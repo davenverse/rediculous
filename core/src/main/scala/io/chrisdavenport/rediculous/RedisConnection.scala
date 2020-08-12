@@ -12,6 +12,8 @@ import fs2.io.tcp._
 import fs2._
 import java.net.InetSocketAddress
 import scala.concurrent.duration._
+import _root_.io.chrisdavenport.rediculous.cluster.HashSlot
+import _root_.io.chrisdavenport.rediculous.cluster.ClusterCommands
 
 
 sealed trait RedisConnection[F[_]]
@@ -21,6 +23,8 @@ object RedisConnection{
     pool: KeyPool[F, Unit, (Socket[F], F[Unit])]
   ) extends RedisConnection[F]
   private case class DirectConnection[F[_]](socket: Socket[F]) extends RedisConnection[F]
+
+  private case class Cluster[F[_]](queue: Chunk[(Deferred[F, Either[Throwable, Resp]], Option[String], Resp)] => F[Unit]) extends RedisConnection[F]
 
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
@@ -51,7 +55,9 @@ object RedisConnection{
   }
 
   def runRequestInternal[F[_]: Concurrent](connection: RedisConnection[F])(
-    inputs: NonEmptyList[NonEmptyList[String]]): F[F[NonEmptyList[Resp]]] = {
+    inputs: NonEmptyList[NonEmptyList[String]],
+    key: Option[String]
+  ): F[F[NonEmptyList[Resp]]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
       def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => Sync[F].delay(l.toNel.getOrElse(throw new Throwable("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))))
       connection match {
@@ -67,15 +73,20 @@ object RedisConnection{
           c.traverse(_._1.get).flatMap(_.sequence.traverse(l => Sync[F].delay(l.toNel.getOrElse(throw new Throwable("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))))).rethrow
         }   
       }
+      case Cluster(queue) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map((_, key, resp))).flatMap{ c => 
+        queue(c).as {
+          c.traverse(_._1.get).flatMap(_.sequence.traverse(l => Sync[F].delay(l.toNel.getOrElse(throw new Throwable("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))))).rethrow
+        }
+      }   
     }
   }
 
   // Can Be used to implement any low level protocols.
-  def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String]): F[F[Either[Resp, A]]] = 
-    runRequestInternal(connection)(NonEmptyList.of(input)).map(_.map(nel => RedisResult[A].decode(nel.head)))
+  def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], key: Option[String]): F[F[Either[Resp, A]]] = 
+    runRequestInternal(connection)(NonEmptyList.of(input), key).map(_.map(nel => RedisResult[A].decode(nel.head)))
 
-  def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String]): Redis[F, A] = Redis(Kleisli{connection: RedisConnection[F] => 
-    runRequest(connection)(input).map{ fE => 
+  def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String], key: Option[String]): Redis[F, A] = Redis(Kleisli{connection: RedisConnection[F] => 
+    runRequest(connection)(input, key).map{ fE => 
       fE.flatMap{
         case Right(a) => a.pure[F]
         case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
@@ -137,4 +148,62 @@ object RedisConnection{
           .drain
           .background
     } yield Queued(queue, keypool.take(()).map(_.map(_._1)))
+
+  def cluster[F[_]: Concurrent: Parallel: Timer: ContextShift](sg: SocketGroup, host: String, port: Int, maxQueued: Int = 10000): Resource[F, RedisConnection[F]] = 
+    for {
+      sockets <- Resource.liftF(single(sg, new InetSocketAddress(host, port)).use(ClusterCommands.clusterslots[Redis[F, *]].unRedis.run(_).flatten))
+      refTopology <- Resource.liftF(Ref[F].of(sockets))
+      queue <- Resource.liftF(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Option[String], Resp)]](maxQueued))
+      keypool <- KeyPoolBuilder[F, (String, Int), (Socket[F], F[Unit])](
+        {t: (String, Int) => sg.client[F](new InetSocketAddress(t._1, t._2)).allocated},
+        { case (_, shutdown) => shutdown}
+      ).build
+      cluster = Cluster(queue.enqueue1)
+      refreshTopology = ClusterCommands.clusterslots[Redis[F, *]].unRedis.run(cluster).flatten.flatMap(refTopology.set)
+      _ <- 
+          queue.dequeue.chunks.map{chunkChunk =>
+            val chunk = chunkChunk.flatten
+            val s = if (chunk.nonEmpty) {
+              Stream.eval(refTopology.get).map{topo => 
+                Stream.eval(topo.random[F]).flatMap{ default => 
+                Stream.emits(
+                    chunk.toList.groupBy{ case (_, s, _) => 
+                    s.flatMap(key => topo.served(HashSlot.find(key))).getOrElse(default)
+                    
+                  }.toList
+                ).evalMap{
+                  case (server, rest) => 
+                    keypool.map(_._1).take(server).use{m =>
+                      val out = Chunk.seq(rest.map(_._3))
+                      explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
+                        case Left(_) => m.canBeReused.set(Reusable.DontReuse)
+                        case _ => Applicative[F].unit
+                      }
+                    }.flatMap{
+                    case Right(n) => 
+                      n.zipWithIndex.parTraverseN(10){
+                        case (ref, i) => 
+                          val v@(toSet, _, _) = rest(i)
+                          ref match {
+                            case Resp.Error(s) if (s.startsWith("MOVED")) => 
+                              refreshTopology >> cluster.queue(Chunk.singleton(v))
+                            case Resp.Error(s) if (s.startsWith("ASK")) => 
+                              toSet.complete(Either.right(ref)) // TODO Handle Ask Redirection (explicit?) Send Asked and then send
+                            case otherwise => 
+                              toSet.complete(Either.right(otherwise))
+                          }
+                      }.void
+                    case e@Left(_) => 
+                      rest.traverse_{ case (deff, _, _) => deff.complete(e.asInstanceOf[Either[Throwable, Resp]])}
+                  }
+
+                }
+              }}.parJoinUnbounded // Send All Acquired values simultaneously. 
+            } else Stream.empty
+            s ++ Stream.eval_(ContextShift[F].shift)
+          }.parJoin(2)
+            .compile
+            .drain
+            .background
+    } yield cluster
 }

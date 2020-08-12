@@ -37,9 +37,15 @@ final case class RedisTransaction[A](value: RedisTransaction.RedisTxState[RedisT
 object RedisTransaction {
 
   implicit val ctx: RedisCtx[RedisTransaction] =  new RedisCtx[RedisTransaction]{
-    def run[A: RedisResult](command: NonEmptyList[String]): RedisTransaction[A] = RedisTransaction(RedisTxState{for {
-      (i, base) <- State.get
-      _ <- State.set((i + 1, command :: base))
+    def keyed[A: RedisResult](key: String, command: NonEmptyList[String]): RedisTransaction[A] = 
+      RedisTransaction(RedisTxState{for {
+        (i, base, value) <- State.get
+        _ <- State.set((i + 1, command :: base, value.orElse(Some(key))))
+      } yield Queued(l => RedisResult[A].decode(l(i)))})
+
+    def unkeyed[A: RedisResult](command: NonEmptyList[String]): RedisTransaction[A] = RedisTransaction(RedisTxState{for {
+      (i, base, value) <- State.get
+      _ <- State.set((i + 1, command :: base, value))
     } yield Queued(l => RedisResult[A].decode(l(i)))})
   }
   implicit val applicative: Applicative[RedisTransaction] = new Applicative[RedisTransaction]{
@@ -65,11 +71,11 @@ object RedisTransaction {
     final case class Error(value: String) extends TxResult[Nothing]
   }
 
-  final case class RedisTxState[A](value: State[(Int, List[NonEmptyList[String]]), A])
+  final case class RedisTxState[A](value: State[(Int, List[NonEmptyList[String]], Option[String]), A])
   object RedisTxState {
 
     implicit val m: Monad[RedisTxState] = new StackSafeMonad[RedisTxState]{
-      def pure[A](a: A): RedisTxState[A] = RedisTxState(Monad[State[(Int, List[NonEmptyList[String]]), *]].pure(a))
+      def pure[A](a: A): RedisTxState[A] = RedisTxState(Monad[State[(Int, List[NonEmptyList[String]], Option[String]), *]].pure(a))
       def flatMap[A, B](fa: RedisTxState[A])(f: A => RedisTxState[B]): RedisTxState[B] = RedisTxState(
         fa.value.flatMap(f.andThen(_.value))
       )
@@ -94,10 +100,10 @@ object RedisTransaction {
   // Operations
   // ----------
   def watch[F[_]: Concurrent](keys: List[String]): Redis[F, Status] = 
-    RedisCtx[Redis[F,*]].run(NonEmptyList("WATCH", keys))
+    RedisCtx[Redis[F,*]].unkeyed(NonEmptyList("WATCH", keys))
 
   def unwatch[F[_]: Concurrent]: Redis[F, Status] = 
-    RedisCtx[Redis[F,*]].run(NonEmptyList.of("UNWATCH"))
+    RedisCtx[Redis[F,*]].unkeyed(NonEmptyList.of("UNWATCH"))
 
   def multiExec[F[_]] = new MultiExecPartiallyApplied[F]
   
@@ -105,13 +111,13 @@ object RedisTransaction {
 
     def apply[A](tx: RedisTransaction[A])(implicit F: Concurrent[F]): Redis[F, TxResult[A]] = {
       Redis(Kleisli{c: RedisConnection[F] => 
-        val ((_, commandsR), Queued(f)) = tx.value.value.run((0, List.empty)).value
+        val ((_, commandsR, key), Queued(f)) = tx.value.value.run((0, List.empty, None)).value
         val commands = commandsR.reverse
         RedisConnection.runRequestInternal(c)(NonEmptyList(
           NonEmptyList.of("MULTI"),
           commands ++ 
           List(NonEmptyList.of("EXEC"))
-        )).map{_.flatMap{_.last match {
+        ), key).map{_.flatMap{_.last match {
           case Resp.Array(Some(a)) => f(a).fold[TxResult[A]](e => TxResult.Error(e.toString), TxResult.Success(_)).pure[F]
           case Resp.Array(None) => (TxResult.Aborted: TxResult[A]).pure[F]
           case other => ApplicativeError[F, Throwable].raiseError(new Throwable(s"EXEC returned $other"))
@@ -119,7 +125,5 @@ object RedisTransaction {
       })
     }
   }
-
-
 
 }

@@ -20,7 +20,7 @@ object TransactionExample extends IOApp {
     r.use {client =>
       val r = (
         RedisCommands.ping[RedisTransaction],
-        RedisCommands.del[RedisTransaction](List("foo")),
+        RedisCommands.del[RedisTransaction]("foo"),
         RedisCommands.get[RedisTransaction]("foo"),
         RedisCommands.set[RedisTransaction]("foo", "value"),
         RedisCommands.get[RedisTransaction]("foo")

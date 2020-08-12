@@ -106,7 +106,8 @@ lazy val commonSettings = Seq(
     "io.chrisdavenport"           %% "log4cats-testing"           % log4catsV     % Test,
 
     "org.specs2"                  %% "specs2-core"                % specs2V       % Test,
-    "org.specs2"                  %% "specs2-scalacheck"          % specs2V       % Test
+    "org.specs2"                  %% "specs2-scalacheck"          % specs2V       % Test,
+    "com.codecommit"              %% "cats-effect-testing-specs2" % "0.4.1"       % Test
   )
 )
 
