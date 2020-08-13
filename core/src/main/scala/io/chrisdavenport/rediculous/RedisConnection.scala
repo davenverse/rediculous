@@ -219,24 +219,29 @@ object RedisConnection{
                       }
                     }.flatMap{
                     case Right(n) => 
-                      n.zipWithIndex.parTraverseN(10){ // Parallelized Due to Possible Holding Loops
+                      n.zipWithIndex.traverse_{
                         case (ref, i) => 
-                          val (toSet, key, server, retries, initialCommand) = rest(i)
+                          val (toSet, key, _, retries, initialCommand) = rest(i)
                           ref match {
                             case Resp.Error(s) if (s.startsWith("MOVED") && retries <= 5)  => // MOVED 1234-2020 127.0.0.1:6381
-                              refreshTopology >> cluster.queue(Chunk.singleton((toSet, key, extractServer(s).orElse(server), retries + 1, initialCommand))) // We only end up here max 
-                            case Resp.Error(s) if (s.startsWith("ASK") && retries <= 5) => // ASK 1234-2020 127.0.0.1:6381
-                              val serverRedirect = extractServer(s).orElse(server)
-                              Deferred[F, Either[Throwable, Resp]].flatMap{d => // No One Cares About this Callback
-                                val asking = (d, key, serverRedirect, 6, Resp.renderRequest(NonEmptyList.of("ASKING"))) // Never Repeat Asking
-                                val repeat = (toSet, key, serverRedirect, retries + 1, initialCommand)
-                                val chunk = Chunk(asking, repeat)
-                                cluster.queue(chunk)
+                              (refreshTopology >> cluster.queue(Chunk.singleton((toSet, key, extractServer(s), retries + 1, initialCommand)))).start.void // We only end up here max 
+                            case e@Resp.Error(s) if (s.startsWith("ASK") && retries <= 5) => // ASK 1234-2020 127.0.0.1:6381
+                              val serverRedirect = extractServer(s)
+                              serverRedirect match {
+                                case s@Some(_) => // This is a Special One Off, Requires a Redirect
+                                  Deferred[F, Either[Throwable, Resp]].flatMap{d => // No One Cares About this Callback
+                                    val asking = (d, key, s, 6, Resp.renderRequest(NonEmptyList.of("ASKING"))) // Never Repeat Asking
+                                    val repeat = (toSet, key, s, retries + 1, initialCommand)
+                                    val chunk = Chunk(asking, repeat)
+                                    cluster.queue(chunk)
+                                  }.start.void
+                                case None => 
+                                  toSet.complete(Either.right(e))
                               }
                             case otherwise => 
                               toSet.complete(Either.right(otherwise))
                           }
-                      }.void
+                      }
                     case e@Left(_) => 
                       rest.traverse_{ case (deff, _, _, _, _) => deff.complete(e.asInstanceOf[Either[Throwable, Resp]])}
                   }
