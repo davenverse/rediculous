@@ -5,7 +5,9 @@ import fs2.Stream
 import fs2.io.tcp._
 import scala.concurrent.duration._
 
-// Send a Single Transaction to the Redis Server
+// Mimics 150 req/s load with 15 operations per request.
+// Completes 1,000,000 redis operations
+// Completes in <8 s
 object ClusterExample extends IOApp {
 
   def run(args: List[String]): IO[ExitCode] = {
@@ -14,7 +16,7 @@ object ClusterExample extends IOApp {
       sg <- SocketGroup[IO](blocker)
       // maxQueued: How many elements before new submissions semantically block.
       // Default 1000 is good for small servers. But can easily take 100,000.
-      connection <- RedisConnection.cluster[IO](sg, "localhost", 30001, maxQueued = 10000)
+      connection <- RedisConnection.cluster[IO](sg, "localhost", 30001, maxQueued = 10000, workers = 2)
     } yield connection
 
     r.use {client =>
@@ -28,14 +30,15 @@ object ClusterExample extends IOApp {
 
       val r = (keyed("foo"), keyed("bar"), keyed("baz")).parTupled
 
-      val r2= List.fill(10)(r.run(client)).parSequence.map{_.flatMap{
-        case ((_,_,_,_, _), (_,_,_,_, _),(_,_,_,_, _)) => List((), (), (), (), (), (), (), (), (), (), (), (), (), (), ())
-      }}
+      val r2= r.run(client).map{
+        case ((_,_,_,_, _), (_,_,_,_, _),(_,_,_,_, _)) => // 3 x 5
+          List.fill(15)(())
+      }
 
       val now = IO(java.time.Instant.now)
       (
         now,
-        Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2)).parJoin(15).take(1000000).compile.drain,
+        Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2)).parJoin(150).take(1000000).compile.drain,
         now
       ).mapN{
         case (before, _, after) => (after.toEpochMilli() - before.toEpochMilli()).millis
