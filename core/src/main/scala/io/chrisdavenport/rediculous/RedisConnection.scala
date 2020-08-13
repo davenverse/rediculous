@@ -27,15 +27,6 @@ object RedisConnection{
 
   private case class Cluster[F[_]](queue: Queue[F, Chunk[(Deferred[F, Either[Throwable, Resp]], Option[String], Option[(String, Int)], Int, Resp)]]) extends RedisConnection[F]
 
-
-  sealed trait DirectBy
-  object DirectBy {
-    case object ToAny extends DirectBy
-    case object Broadcast extends DirectBy
-    final case class Server(host: String, port: Int) extends DirectBy
-    final case class Key(key: String) extends DirectBy
-  }
-
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
   private[rediculous] def explicitPipelineRequest[F[_]: MonadError[*[_], Throwable]](socket: Socket[F], calls: Chunk[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[List[Resp]] = {
