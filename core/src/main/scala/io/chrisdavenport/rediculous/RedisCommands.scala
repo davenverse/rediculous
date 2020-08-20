@@ -477,7 +477,7 @@ object RedisCommands {
     RedisCtx[F].keyed(keyvalue._1, NEL("MSET", List(keyvalue._1.encode, keyvalue._2.encode)))
 
   def setex[F[_]: RedisCtx](key: String, seconds: Long, value: String): F[Status] = 
-    RedisCtx[F].keyed(key, NEL.of(key.encode, seconds.encode, value.encode))
+    RedisCtx[F].keyed(key, NEL.of("SETEX", key.encode, seconds.encode, value.encode))
 
   def psetex[F[_]: RedisCtx](key: String, milliseconds: Long, value: String): F[Status] = 
     RedisCtx[F].keyed(key, NEL.of("PSETEX", key.encode, milliseconds.encode, value.encode))
