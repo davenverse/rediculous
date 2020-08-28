@@ -205,11 +205,11 @@ object RedisConnection{
         .tupled
         .flatMap{
           case ((_, setAt), now) if setAt.isAfter(now.minusSeconds(1)) => Applicative[F].unit
-          case ((topo, _), now) => 
+          case ((topo, _), _) => 
             topo.random
             .flatMap{ case (host, port) =>
               keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
-            }.flatMap(s => refTopology.set((s,now)))
+            }.flatMap(s => Sync[F].delay(java.time.Instant.now).flatMap(now => refTopology.set((s,now))))
         }
       )
 
