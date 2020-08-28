@@ -52,6 +52,8 @@ object RedisTransaction {
       (i, base, value) <- State.get
       _ <- State.set((i + 1, command :: base, value))
     } yield Queued(l => RedisResult[A].decode(l(i)))})
+
+    def broadcast[A: RedisResult](command: NonEmptyList[String]): RedisTransaction[A] = unkeyed(command)
   }
   implicit val applicative: Applicative[RedisTransaction] = new Applicative[RedisTransaction]{
     def pure[A](a: A) = RedisTransaction(Monad[RedisTxState].pure(Monad[Queued].pure(a)))
@@ -122,7 +124,7 @@ object RedisTransaction {
           NonEmptyList.of("MULTI"),
           commands ++ 
           List(NonEmptyList.of("EXEC"))
-        ), key).map{_.flatMap{_.last match {
+        ), key.map(s => RedisCtx.CtxType.Keyed(s)).getOrElse(RedisCtx.CtxType.Random)).map{_.flatMap{_.last match {
           case Resp.Array(Some(a)) => f(a).fold[TxResult[A]](e => TxResult.Error(e.toString), TxResult.Success(_)).pure[F]
           case Resp.Array(None) => (TxResult.Aborted: TxResult[A]).pure[F]
           case other => ApplicativeError[F, Throwable].raiseError(RedisError.Generic(s"EXEC returned $other"))

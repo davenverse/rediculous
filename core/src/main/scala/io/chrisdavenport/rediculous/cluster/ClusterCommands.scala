@@ -31,6 +31,9 @@ object ClusterCommands {
     }
   }
   final case class ClusterSlots(l: List[ClusterSlot]){
+
+    def all: Set[(String, Int)] = l.flatMap(_.replicas).map(s => (s.host, s.port)).toSet
+
     def served(bucket: Int): Option[(String, Int)] = 
       l.collectFirst{
         case ClusterSlot(start, end, master :: _) if start <= bucket && end >= bucket => (master.host, master.port) 

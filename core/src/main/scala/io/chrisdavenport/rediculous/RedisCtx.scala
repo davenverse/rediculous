@@ -16,16 +16,26 @@ please consult your library documentation.
 trait RedisCtx[F[_]]{
   def keyed[A: RedisResult](key: String, command: NonEmptyList[String]): F[A]
   def unkeyed[A: RedisResult](command: NonEmptyList[String]): F[A]
+  def broadcast[A: RedisResult](command: NonEmptyList[String]): F[A]
 }
 
 object RedisCtx {
   
   def apply[F[_]](implicit ev: RedisCtx[F]): ev.type = ev
 
+  sealed trait CtxType
+  object CtxType {
+    case class Keyed(key: String) extends CtxType
+    case object Broadcast extends CtxType
+    case object Random extends CtxType
+  }
+
   implicit def redis[F[_]: Concurrent]: RedisCtx[Redis[F, *]] = new RedisCtx[Redis[F, *]]{
     def keyed[A: RedisResult](key: String, command: NonEmptyList[String]): Redis[F,A] = 
-      RedisConnection.runRequestTotal(command, Some(key))
+      RedisConnection.runRequestTotal(command, CtxType.Keyed(key))
     def unkeyed[A: RedisResult](command: NonEmptyList[String]): Redis[F, A] = 
-      RedisConnection.runRequestTotal(command, None)
+      RedisConnection.runRequestTotal(command, CtxType.Random)
+    def broadcast[A: RedisResult](command: NonEmptyList[String]): Redis[F, A] =
+      RedisConnection.runRequestTotal(command, CtxType.Broadcast)
   }
 }
