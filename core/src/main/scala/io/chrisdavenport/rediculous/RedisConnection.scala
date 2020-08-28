@@ -219,7 +219,7 @@ object RedisConnection{
           queue.dequeue.chunks.map{chunkChunk =>
             val chunk = chunkChunk.flatten
             val s = if (chunk.nonEmpty) {
-              Stream.eval(refTopology.get).map(_._1).map{topo => 
+              Stream.eval(refTopology.get).map{ case (topo,_) => 
                 Stream.eval(topo.random[F]).flatMap{ default => 
                 Stream.emits(
                     chunk.toList.groupBy{ case (_, s, server,_,_) => // TODO Investigate Efficient Group By
