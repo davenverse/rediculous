@@ -25,7 +25,7 @@ object RedisConnection{
   ) extends RedisConnection[F]
   private case class DirectConnection[F[_]](socket: Socket[F]) extends RedisConnection[F]
 
-  private case class Cluster[F[_]](queue: Queue[F, Chunk[(Deferred[F, Either[Throwable, Resp]], Option[String], Option[(String, Int)], Int, Resp)]]) extends RedisConnection[F]
+  private case class Cluster[F[_]](queue: Queue[F, Chunk[(Deferred[F, Either[Throwable, Resp]], RedisCtx.CtxType, Option[(String, Int)], Int, Resp)]]) extends RedisConnection[F]
 
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
@@ -57,7 +57,7 @@ object RedisConnection{
 
   def runRequestInternal[F[_]: Concurrent](connection: RedisConnection[F])(
     inputs: NonEmptyList[NonEmptyList[String]],
-    key: Option[String]
+    ctx: RedisCtx.CtxType
   ): F[F[NonEmptyList[Resp]]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
       def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => Sync[F].delay(l.toNel.getOrElse(throw RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))))
@@ -74,7 +74,7 @@ object RedisConnection{
           c.traverse(_._1.get).flatMap(_.sequence.traverse(l => Sync[F].delay(l.toNel.getOrElse(throw RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))))).rethrow
         }   
       }
-      case Cluster(queue) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map((_, key, None, 0, resp))).flatMap{ c => 
+      case Cluster(queue) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map((_, ctx, None, 0, resp))).flatMap{ c => 
         queue.enqueue1(c).as {
           c.traverse(_._1.get).flatMap(_.sequence.traverse(l => Sync[F].delay(l.toNel.getOrElse(throw RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))))).rethrow
         }
@@ -83,11 +83,11 @@ object RedisConnection{
   }
 
   // Can Be used to implement any low level protocols.
-  def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], key: Option[String]): F[F[Either[Resp, A]]] = 
-    runRequestInternal(connection)(NonEmptyList.of(input), key).map(_.map(nel => RedisResult[A].decode(nel.head)))
+  def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], ctx: RedisCtx.CtxType): F[F[Either[Resp, A]]] = 
+    runRequestInternal(connection)(NonEmptyList.of(input), ctx).map(_.map(nel => RedisResult[A].decode(nel.head)))
 
-  def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String], key: Option[String]): Redis[F, A] = Redis(Kleisli{connection: RedisConnection[F] => 
-    runRequest(connection)(input, key).map{ fE => 
+  def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String], ctx: RedisCtx.CtxType): Redis[F, A] = Redis(Kleisli{connection: RedisConnection[F] => 
+    runRequest(connection)(input, ctx).map{ fE => 
       fE.flatMap{
         case Right(a) => a.pure[F]
         case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
@@ -196,7 +196,7 @@ object RedisConnection{
       ).build
       sockets <- Resource.liftF(keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_)))
       refTopology <- Resource.liftF(Ref[F].of(sockets))
-      queue <- Resource.liftF(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Option[String], Option[(String, Int)], Int, Resp)]](maxQueued))
+      queue <- Resource.liftF(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], RedisCtx.CtxType, Option[(String, Int)], Int, Resp)]](maxQueued))
       cluster = Cluster(queue)
       refreshTopology = refTopology.get.flatMap(_.random).flatMap{ case (host, port) =>
         keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
@@ -208,22 +208,20 @@ object RedisConnection{
               Stream.eval(refTopology.get).map{topo => 
                 Stream.eval(topo.random[F]).flatMap{ default => 
                 Stream.emits(
-                    chunk.toList.groupBy{ case (_, s, server,_,_) => // TODO Investigate Efficient Group By
-                    server.orElse(s.flatMap(key => topo.served(HashSlot.find(key)))).getOrElse(default) // Explicitly Set Server, Key Hashslot Server, or a default server if none selected.
-                  }.toSeq
+                  sortToServers(chunk, {s => topo.served(HashSlot.find(s))}, default, topo.all).toList
                 ).evalMap{
                   case (server, rest) => 
                     keypool.map(_._1).take(server).use{m =>
-                      val out = Chunk.seq(rest.map(_._5))
+                      val out = Chunk.seq(rest.map(_._5).toList)
                       explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
                         case Left(_) => m.canBeReused.set(Reusable.DontReuse)
                         case _ => Applicative[F].unit
                       }
                     }.flatMap{
                     case Right(n) => 
-                      n.zipWithIndex.traverse_{
+                      n.zipWithIndex.traverse_[F, Unit]{
                         case (ref, i) => 
-                          val (toSet, key, _, retries, initialCommand) = rest(i)
+                          val (toSet, key, _, retries, initialCommand) = rest.toList(i)
                           ref match {
                             case e@Resp.Error(s) if (s.startsWith("MOVED") && retries <= 5)  => // MOVED 1234-2020 127.0.0.1:6381
                               refreshTopology.attempt.void >>
@@ -283,5 +281,42 @@ object RedisConnection{
       val port = s.substring(portSplit +1, s.length())
       Either.catchNonFatal(port.toInt).toOption.map((host, _))
     } else None
+  }
+
+  private def sortToServers[F[_]](
+    chunk: Chunk[(Deferred[F, Either[Throwable, Resp]], RedisCtx.CtxType, Option[(String, Int)], Int, Resp)],
+    f: String => Option[(String, Int)],
+    default: (String, Int),
+    all: Set[(String, Int)]
+  ): Map[(String, Int), NonEmptyList[(Deferred[F, Either[Throwable, Resp]], RedisCtx.CtxType, Option[(String, Int)], Int, Resp)]] = {
+    groupByMany(chunk){ case (_, ctx, server, _, _) => 
+      server.map(Set(_)).getOrElse(
+        ctx match {
+          case RedisCtx.CtxType.Keyed(key) => f(key).map(Set(_)).getOrElse(Set(default))
+          case RedisCtx.CtxType.Random => Set(default)
+          case RedisCtx.CtxType.Broadcast => all
+        }
+      )
+    }
+  }
+
+  private def groupByMany[F[_], A](fa: F[A]): GroupByMany[F, A]= new GroupByMany(fa) 
+    
+  private class GroupByMany[F[_], A](fa: F[A]){
+    def apply[K](f: A => Set[K])(implicit F: Foldable[F]): Map[K, NonEmptyList[A]] = {
+      Foldable[F].foldRight(fa, Eval.now(Map.empty[K, NonEmptyList[A]])){
+        case (x, eva) => eva.map{ acc => 
+          val k = f(x)
+          k.foldLeft(acc){ case (acc, k) =>
+            val nextAcc = acc.get(k).fold(
+              acc + (k -> NonEmptyList.of(x))
+            )( value => 
+              acc + (k -> value.prepend(x))
+            )
+            nextAcc
+          }
+        }
+      }.value
+    }
   }
 }

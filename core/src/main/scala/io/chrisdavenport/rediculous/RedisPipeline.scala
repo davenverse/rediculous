@@ -31,6 +31,9 @@ object RedisPipeline {
       (i, base, value) <- State.get
       _ <- State.set((i + 1, command :: base, value))
     } yield RedisTransaction.Queued(l => RedisResult[A].decode(l(i)))})
+
+    def broadcast[A: RedisResult](command: NonEmptyList[String]): RedisPipeline[A] =
+      unkeyed(command)
   }
 
   implicit val applicative: Applicative[RedisPipeline] = new Applicative[RedisPipeline]{
@@ -58,7 +61,7 @@ object RedisPipeline {
       Redis(Kleisli{c: RedisConnection[F] => 
         val ((_, commandsR, key), RedisTransaction.Queued(f)) = tx.value.value.run((0, List.empty, None)).value
         val commands = commandsR.reverse.toNel
-        commands.traverse(nelCommands => RedisConnection.runRequestInternal(c)(nelCommands, key) // We Have to Actually Send A Command
+        commands.traverse(nelCommands => RedisConnection.runRequestInternal(c)(nelCommands, key.map(s => RedisCtx.CtxType.Keyed(s)).getOrElse(RedisCtx.CtxType.Random)) // We Have to Actually Send A Command
           .map{fNel => RedisConnection.closeReturn(fNel.map(a => f(a.toList)))}
         ).flatMap{fOpt => 
           fOpt.map(_.pure[F]).getOrElse(F.raiseError(RedisError.Generic("Rediculous: Attempted to Pipeline Empty Command")))

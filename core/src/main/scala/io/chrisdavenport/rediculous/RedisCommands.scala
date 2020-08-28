@@ -249,7 +249,7 @@ object RedisCommands {
     RedisCtx[F].unkeyed(NEL.of("COMMAND", "COUNT"))
 
   def clientsetname[F[_]: RedisCtx](connectionName: String): F[String] = 
-    RedisCtx[F].unkeyed(NEL.of("CLIENT", "SETNAME", connectionName.encode))
+    RedisCtx[F].broadcast(NEL.of("CLIENT", "SETNAME", connectionName.encode))
 
   def zrank[F[_]: RedisCtx](key: String, member: String): F[Long] = 
     RedisCtx[F].keyed(key, NEL.of("ZRANK", key.encode, member.encode))
@@ -386,7 +386,7 @@ object RedisCommands {
     RedisCtx[F].unkeyed(NEL.of("CONFIG", "SET", parameter.encode, value.encode))
 
   def scriptflush[F[_]: RedisCtx]: F[Status] = 
-    RedisCtx[F].unkeyed(NEL.of("SCRIPT", "FLUSH"))
+    RedisCtx[F].broadcast(NEL.of("SCRIPT", "FLUSH"))
 
   def dbsize[F[_]: RedisCtx]: F[Long] = 
     RedisCtx[F].unkeyed(NEL.of("DBSIZE"))
