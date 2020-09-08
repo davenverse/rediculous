@@ -184,7 +184,9 @@ object RedisConnection{
     workers: Int = 2,
     parallelServerCalls: Int = Int.MaxValue,
     tlsContext: Option[TLSContext] = None,
-    tlsParameters: TLSParameters = TLSParameters.Default
+    tlsParameters: TLSParameters = TLSParameters.Default,
+    useDynamicRefreshSource: Boolean = true, // Set to false to only use initially provided host for topology refresh
+    cacheTopologySeconds: FiniteDuration = 1.second, // How long topology will not be rechecked for after a succesful refresh
   ): Resource[F, RedisConnection[F]] = 
     for {
       keypool <- KeyPoolBuilder[F, (String, Int), (Socket[F], F[Unit])](
@@ -201,15 +203,19 @@ object RedisConnection{
       refreshLock <- Resource.liftF(Semaphore[F](1L))
       refTopology <- Resource.liftF(Ref[F].of((sockets, now)))
       refreshTopology = refreshLock.withPermit(
-        (refTopology.get, Clock[F].instantNow)
-        .tupled
+        (
+          refTopology.get
+            .flatMap{ case (topo, setAt) => 
+              if (useDynamicRefreshSource) topo.random.map((_, setAt)) 
+              else Applicative[F].pure(((host, port), setAt))
+          },
+          Clock[F].instantNow
+        ).tupled
         .flatMap{
-          case ((_, setAt), now) if setAt.isAfter(now.minusSeconds(1)) => Applicative[F].unit
-          case ((topo, _), _) => 
-            topo.random
-            .flatMap{ case (host, port) =>
-              keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
-            }.flatMap(s => Clock[F].instantNow.flatMap(now => refTopology.set((s,now))))
+          case ((_, setAt), now) if setAt.isAfter(now.minusSeconds(cacheTopologySeconds.toSeconds)) => Applicative[F].unit
+          case (((host, port), _), _) => 
+            keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
+              .flatMap(s => Clock[F].instantNow.flatMap(now => refTopology.set((s,now))))
         }
       )
 
