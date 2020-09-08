@@ -270,7 +270,8 @@ object RedisConnection{
                               toSet.complete(Either.right(otherwise))
                           }
                       }
-                    case e@Left(_) => 
+                    case e@Left(_) =>
+                      refreshTopology.attempt.void >>
                       rest.traverse_{ case (deff, _, _, _, _) => deff.complete(e.asInstanceOf[Either[Throwable, Resp]])}
                   }
 
