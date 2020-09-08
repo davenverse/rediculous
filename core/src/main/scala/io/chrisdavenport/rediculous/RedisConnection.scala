@@ -197,11 +197,11 @@ object RedisConnection{
 
       // Cluster Topology Acquisition and Management
       sockets <- Resource.liftF(keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_)))
-      now <- Resource.liftF(Sync[F].delay(java.time.Instant.now))
+      now <- Resource.liftF(Clock[F].instantNow)
       refreshLock <- Resource.liftF(Semaphore[F](1L))
       refTopology <- Resource.liftF(Ref[F].of((sockets, now)))
       refreshTopology = refreshLock.withPermit(
-        (refTopology.get, Sync[F].delay(java.time.Instant.now))
+        (refTopology.get, Clock[F].instantNow)
         .tupled
         .flatMap{
           case ((_, setAt), now) if setAt.isAfter(now.minusSeconds(1)) => Applicative[F].unit
@@ -209,7 +209,7 @@ object RedisConnection{
             topo.random
             .flatMap{ case (host, port) =>
               keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
-            }.flatMap(s => Sync[F].delay(java.time.Instant.now).flatMap(now => refTopology.set((s,now))))
+            }.flatMap(s => Clock[F].instantNow.flatMap(now => refTopology.set((s,now))))
         }
       )
 
