@@ -26,6 +26,9 @@ object RedisConnection{
   private case class DirectConnection[F[_]](socket: Socket[F]) extends RedisConnection[F]
 
   private case class Cluster[F[_]](queue: Queue[F, Chunk[(Deferred[F, Either[Throwable, Resp]], Option[String], Option[(String, Int)], Int, Resp)]]) extends RedisConnection[F]
+  object Cluster {
+    case class 
+  }
 
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
@@ -270,7 +273,8 @@ object RedisConnection{
                               toSet.complete(Either.right(otherwise))
                           }
                       }
-                    case e@Left(_) => 
+                    case e@Left(_) =>
+                      refreshTopology.attempt.void >>
                       rest.traverse_{ case (deff, _, _, _, _) => deff.complete(e.asInstanceOf[Either[Throwable, Resp]])}
                   }
 
