@@ -194,18 +194,32 @@ object RedisConnection{
         },
         { case (_, shutdown) => shutdown}
       ).build
+
+      // Cluster Topology Acquisition and Management
       sockets <- Resource.liftF(keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_)))
-      refTopology <- Resource.liftF(Ref[F].of(sockets))
+      now <- Resource.liftF(Clock[F].instantNow)
+      refreshLock <- Resource.liftF(Semaphore[F](1L))
+      refTopology <- Resource.liftF(Ref[F].of((sockets, now)))
+      refreshTopology = refreshLock.withPermit(
+        (refTopology.get, Clock[F].instantNow)
+        .tupled
+        .flatMap{
+          case ((_, setAt), now) if setAt.isAfter(now.minusSeconds(1)) => Applicative[F].unit
+          case ((topo, _), _) => 
+            topo.random
+            .flatMap{ case (host, port) =>
+              keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
+            }.flatMap(s => Clock[F].instantNow.flatMap(now => refTopology.set((s,now))))
+        }
+      )
+
       queue <- Resource.liftF(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Option[String], Option[(String, Int)], Int, Resp)]](maxQueued))
       cluster = Cluster(queue)
-      refreshTopology = refTopology.get.flatMap(_.random).flatMap{ case (host, port) =>
-        keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
-      }.flatMap(s => refTopology.set(s))
       _ <- 
           queue.dequeue.chunks.map{chunkChunk =>
             val chunk = chunkChunk.flatten
             val s = if (chunk.nonEmpty) {
-              Stream.eval(refTopology.get).map{topo => 
+              Stream.eval(refTopology.get).map{ case (topo,_) => 
                 Stream.eval(topo.random[F]).flatMap{ default => 
                 Stream.emits(
                     chunk.toList.groupBy{ case (_, s, server,_,_) => // TODO Investigate Efficient Group By
