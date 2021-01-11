@@ -133,7 +133,7 @@ object RedisCommands {
     val default = SetOpts(None, None, None, false)
   }
 
-  def set[F[_]: RedisCtx](key: String, value: String, setOpts: SetOpts = SetOpts.default): F[Status] = {
+  def set[F[_]: RedisCtx](key: String, value: String, setOpts: SetOpts = SetOpts.default): F[Option[Status]] = {
     val ex = setOpts.setSeconds.toList.flatMap(l => List("EX", l.encode))
     val px = setOpts.setMilliseconds.toList.flatMap(l => List("PX", l.encode))
     val condition = setOpts.setCondition.toList.map(_.encode)
