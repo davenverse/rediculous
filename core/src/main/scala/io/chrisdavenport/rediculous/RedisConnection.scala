@@ -16,6 +16,7 @@ import _root_.io.chrisdavenport.rediculous.cluster.HashSlot
 import _root_.io.chrisdavenport.rediculous.cluster.ClusterCommands
 import fs2.io.tls.TLSContext
 import fs2.io.tls.TLSParameters
+import _root_.io.chrisdavenport.rediculous.cluster.ClusterCommands.ClusterSlots
 
 sealed trait RedisConnection[F[_]]
 object RedisConnection{
@@ -207,8 +208,7 @@ object RedisConnection{
           refTopology.get
             .flatMap{ case (topo, setAt) => 
               if (useDynamicRefreshSource) 
-                Applicative[F].pure((topo.l.flatMap(c => c.replicas).map(r => (r.host, r.port)).toNel.getOrElse(NonEmptyList.of((host, port))), setAt))
-              //  topo.random.map((_, setAt)) 
+                Applicative[F].pure((NonEmptyList((host, port), topo.l.flatMap(c => c.replicas).map(r => (r.host, r.port))), setAt))
               else Applicative[F].pure((NonEmptyList.of((host, port)), setAt))
           },
           Clock[F].instantNow
@@ -219,11 +219,11 @@ object RedisConnection{
             keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
               .flatMap(s => Clock[F].instantNow.flatMap(now => refTopology.set((s,now))))
           case ((l, _), _) => 
-            val nelActions: NonEmptyList[F[Unit]] = l.map{ case (host, port) => 
+            val nelActions: NonEmptyList[F[ClusterSlots]] = l.map{ case (host, port) => 
               keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
-                .flatMap(s => Clock[F].instantNow.flatMap(now => refTopology.set((s,now))))
             }
             raceNThrowFirst(nelActions)
+              .flatMap(s => Clock[F].instantNow.flatMap(now => refTopology.set((s,now))))
         }
       )
 
