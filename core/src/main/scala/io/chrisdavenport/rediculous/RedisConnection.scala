@@ -206,16 +206,24 @@ object RedisConnection{
         (
           refTopology.get
             .flatMap{ case (topo, setAt) => 
-              if (useDynamicRefreshSource) topo.random.map((_, setAt)) 
-              else Applicative[F].pure(((host, port), setAt))
+              if (useDynamicRefreshSource) 
+                Applicative[F].pure((topo.l.flatMap(c => c.replicas).map(r => (r.host, r.port)).toNel.getOrElse(NonEmptyList.of((host, port))), setAt))
+              //  topo.random.map((_, setAt)) 
+              else Applicative[F].pure((NonEmptyList.of((host, port)), setAt))
           },
           Clock[F].instantNow
         ).tupled
         .flatMap{
           case ((_, setAt), now) if setAt.isAfter(now.minusSeconds(cacheTopologySeconds.toSeconds)) => Applicative[F].unit
-          case (((host, port), _), _) => 
+          case ((NonEmptyList((host, port), Nil), _), _) => 
             keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
               .flatMap(s => Clock[F].instantNow.flatMap(now => refTopology.set((s,now))))
+          case ((l, _), _) => 
+            val nelActions: NonEmptyList[F[Unit]] = l.map{ case (host, port) => 
+              keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
+                .flatMap(s => Clock[F].instantNow.flatMap(now => refTopology.set((s,now))))
+            }
+            raceNThrowFirst(nelActions)
         }
       )
 
@@ -305,4 +313,31 @@ object RedisConnection{
       Either.catchNonFatal(port.toInt).toOption.map((host, _))
     } else None
   }
+
+  def raceN[F[_]: Concurrent, A](nel: NonEmptyList[F[A]]): F[Either[NonEmptyList[Throwable], A]] = {
+    for {
+      deferred <- Deferred[F, A]
+      out <- Bracket[F, Throwable].bracket(
+        nel.traverse(fa =>
+          Concurrent[F].start(fa.flatMap(a => deferred.complete(a).as(a)).attempt)
+        )
+      ){
+        fibers: NonEmptyList[Fiber[F, Either[Throwable, A]]] => 
+          Concurrent[F].race(
+            fibers.traverse(_.join).map(
+                _.traverse(_.swap).swap
+            ),
+            deferred.get
+          )
+      }(
+        fibers => fibers.traverse_(_.cancel.attempt)
+      )
+    } yield out.fold(identity, Either.right)
+  }
+
+  def raceNThrowFirst[F[_]: Concurrent, A](nel: NonEmptyList[F[A]]): F[A] = 
+    raceN(nel).flatMap{
+      case Left(NonEmptyList(a, _)) => Concurrent[F].raiseError(a)
+      case Right(a) => Concurrent[F].pure(a)
+    }
 }
