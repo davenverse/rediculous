@@ -215,9 +215,6 @@ object RedisConnection{
         ).tupled
         .flatMap{
           case ((_, setAt), now) if setAt.isAfter(now.minusSeconds(cacheTopologySeconds.toSeconds)) => Applicative[F].unit
-          case ((NonEmptyList((host, port), Nil), _), _) => 
-            keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
-              .flatMap(s => Clock[F].instantNow.flatMap(now => refTopology.set((s,now))))
           case ((l, _), _) => 
             val nelActions: NonEmptyList[F[ClusterSlots]] = l.map{ case (host, port) => 
               keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
