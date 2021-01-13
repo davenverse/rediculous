@@ -15,20 +15,20 @@ object RedisArg {
     }
   }
 
-  implicit val string = new RedisArg[String] {
+  implicit val string : RedisArg[String] = new RedisArg[String] {
     def encode(a: String): String = a
   }
 
-  implicit val int = new RedisArg[Int] {
+  implicit val int: RedisArg[Int] = new RedisArg[Int] {
     def encode(a: Int): String = a.toString()
   }
 
-  implicit val long = new RedisArg[Long] {
+  implicit val long: RedisArg[Long] = new RedisArg[Long] {
     def encode(a: Long): String = a.toString()
   }
 
   // Check this later
-  implicit val double = new RedisArg[Double] {
+  implicit val double: RedisArg[Double] = new RedisArg[Double] {
     def encode(a: Double): String = 
       if (a.isInfinite() && a > 0) "+inf"
       else if (a.isInfinite() && a < 0) "-inf"

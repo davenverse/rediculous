@@ -10,7 +10,12 @@ sealed trait Resp
 
 object Resp {
   import scala.{Array => SArray}
-  sealed trait RespParserResult[+A]
+  sealed trait RespParserResult[+A]{
+    def extract: Option[A] = this match {
+      case ParseComplete(out, _) => Some(out)
+      case _ => None
+    }
+  }
   final case class ParseComplete[A](value: A, rest: SArray[Byte]) extends RespParserResult[A]
   final case class ParseIncomplete(arr: SArray[Byte]) extends RespParserResult[Nothing]
   final case class ParseError(message: String, cause: Option[Throwable]) extends RedisError with RespParserResult[Nothing]

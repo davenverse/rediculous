@@ -54,7 +54,7 @@ object Redis {
       def apply[A](fa: Par[F,A]): Redis[F,A] = unwrap(fa)
     }
 
-    implicit def parApplicative[F[_]: Parallel: Bracket[*[_], Throwable]]: Applicative[Par[F, *]] = new Applicative[Par[F, *]]{
+    implicit def parApplicative[F[_]: Parallel: BracketThrow]: Applicative[Par[F, *]] = new Applicative[Par[F, *]]{
       def ap[A, B](ff: Par[F,A => B])(fa: Par[F,A]): Par[F,B] = Par(Redis(
         Par.unwrap(ff).unRedis.flatMap{ ff => 
           Par.unwrap(fa).unRedis.map{fa =>  Parallel[F].sequential(

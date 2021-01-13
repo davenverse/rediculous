@@ -9,7 +9,7 @@ object ClusterCommands {
 
   final case class ClusterServer(host: String, port: Int, id: String)
   object ClusterServer {
-    implicit val result = new RedisResult[ClusterServer]{
+    implicit val result: RedisResult[ClusterServer] = new RedisResult[ClusterServer]{
       def decode(resp: Resp): Either[Resp,ClusterServer] = resp match {
         case Resp.Array(Some(Resp.BulkString(Some(host)) :: Resp.Integer(l) :: Resp.BulkString(Some(id)) :: Nil)) => 
           ClusterServer(host, l.toInt, id).asRight
@@ -20,7 +20,7 @@ object ClusterCommands {
   final case class ClusterSlot(start: Int, end: Int, replicas: List[ClusterServer])
   object ClusterSlot {
     
-    implicit val result = new RedisResult[ClusterSlot]{
+    implicit val result: RedisResult[ClusterSlot] = new RedisResult[ClusterSlot]{
       def decode(resp: Resp): Either[Resp,ClusterSlot] = resp match {
         case Resp.Array(Some(Resp.Integer(start) :: Resp.Integer(end) :: rest)) => 
           rest.traverse(RedisResult[ClusterServer].decode).map{l => 
@@ -48,7 +48,7 @@ object ClusterCommands {
     }
   }
   object ClusterSlots {
-    implicit val result = new RedisResult[ClusterSlots]{
+    implicit val result: RedisResult[ClusterSlots] = new RedisResult[ClusterSlots]{
       def decode(resp: Resp): Either[Resp,ClusterSlots] = 
         RedisResult[List[ClusterSlot]].decode(resp).map(ClusterSlots(_))
     }

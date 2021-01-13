@@ -1,30 +1,28 @@
 package io.chrisdavenport.rediculous.cluster
 
-import cats.effect.testing.specs2.CatsIO
+import cats.syntax.all._
 
-class HashSlotSpec extends org.specs2.mutable.Specification with org.specs2.ScalaCheck with CatsIO {
-  "HashSlot.hashKey" should {
-    "Find the right key section for a keyslot" in {
+class HashSlotSpec extends munit.FunSuite {
+    test("HashSlot.hashKey Find the right key section for a keyslot"){
       val input = "{user.name}.foo"
-      HashSlot.hashKey(input) must_=== "user.name"
+      assert(HashSlot.hashKey(input) === "user.name")
     }
-    "Find the right key in middle of key" in {
+    test("HashSlot.hashKey Find the right key in middle of key") {
       val input = "bar{foo}baz"
-      HashSlot.hashKey(input) must_=== "foo"
+      assert(HashSlot.hashKey(input) === "foo")
     }
-    "Find the right key at end of key" in {
+    test("HashSlot.hashKey Find the right key at end of key"){
       val input = "barbaz{foo}"
-      HashSlot.hashKey(input) must_=== "foo"
+      assert(HashSlot.hashKey(input) === "foo")
     }
-    "output original key if braces are directly next to each other" in {
+    test("HashSlot.hashKey output original key if braces are directly next to each other"){
       val input = "{}.bar"
-      HashSlot.hashKey(input) must_=== input
+      assert(HashSlot.hashKey(input) === input)
     }
-    "output the full value if no keyslot present" in {
+    test("HashSlot.hashKey output the full value if no keyslot present") {
       val input = "bazbarfoo"
-      HashSlot.hashKey(input) must_=== input
+      assert(HashSlot.hashKey(input) === input)
     }
-  }
 
   /**
   import cats.implicits._
@@ -48,7 +46,6 @@ class HashSlotSpec extends org.specs2.mutable.Specification with org.specs2.Scal
         out => HashSlot.find(s) must_=== out
       }
     }
-  }
   **/
   
 }
