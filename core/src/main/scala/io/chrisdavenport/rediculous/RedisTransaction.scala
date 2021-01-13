@@ -44,12 +44,14 @@ object RedisTransaction {
   implicit val ctx: RedisCtx[RedisTransaction] =  new RedisCtx[RedisTransaction]{
     def keyed[A: RedisResult](key: String, command: NonEmptyList[String]): RedisTransaction[A] = 
       RedisTransaction(RedisTxState{for {
-        (i, base, value) <- State.get
+        out <- State.get[(Int, List[NonEmptyList[String]], Option[String])]
+        (i, base, value) = out
         _ <- State.set((i + 1, command :: base, value.orElse(Some(key))))
       } yield Queued(l => RedisResult[A].decode(l(i)))})
 
     def unkeyed[A: RedisResult](command: NonEmptyList[String]): RedisTransaction[A] = RedisTransaction(RedisTxState{for {
-      (i, base, value) <- State.get
+      out <- State.get[(Int, List[NonEmptyList[String]], Option[String])]
+      (i, base, value) = out
       _ <- State.set((i + 1, command :: base, value))
     } yield Queued(l => RedisResult[A].decode(l(i)))})
   }
@@ -72,7 +74,7 @@ object RedisTransaction {
   sealed trait TxResult[+A]
   object TxResult {
     final case class Success[A](value: A) extends TxResult[A]
-    final case object Aborted extends TxResult[Nothing]
+    case object Aborted extends TxResult[Nothing]
     final case class Error(value: String) extends TxResult[Nothing]
   }
 
@@ -115,7 +117,7 @@ object RedisTransaction {
   class MultiExecPartiallyApplied[F[_]]{
 
     def apply[A](tx: RedisTransaction[A])(implicit F: Concurrent[F]): Redis[F, TxResult[A]] = {
-      Redis(Kleisli{c: RedisConnection[F] => 
+      Redis(Kleisli{(c: RedisConnection[F]) => 
         val ((_, commandsR, key), Queued(f)) = tx.value.value.run((0, List.empty, None)).value
         val commands = commandsR.reverse
         RedisConnection.runRequestInternal(c)(NonEmptyList(

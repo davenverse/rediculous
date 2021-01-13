@@ -1,12 +1,12 @@
 package io.chrisdavenport.rediculous
 
-import cats.effect._
+import cats.effect.{MonadThrow => _, _}
 import cats.effect.concurrent._
 import cats.effect.implicits._
 import cats._
 import cats.implicits._
 import cats.data._
-import io.chrisdavenport.keypool._
+import _root_.org.typelevel.keypool._
 import fs2.concurrent.Queue
 import fs2.io.tcp._
 import fs2._
@@ -30,7 +30,7 @@ object RedisConnection{
 
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
-  private[rediculous] def explicitPipelineRequest[F[_]: MonadError[*[_], Throwable]](socket: Socket[F], calls: Chunk[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[List[Resp]] = {
+  private[rediculous] def explicitPipelineRequest[F[_]: MonadThrow](socket: Socket[F], calls: Chunk[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[List[Resp]] = {
     def getTillEqualSize(acc: List[List[Resp]], lastArr: Array[Byte]): F[List[Resp]] = 
     socket.read(maxBytes, timeout).flatMap{
       case None => 
@@ -87,7 +87,7 @@ object RedisConnection{
   def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], key: Option[String]): F[F[Either[Resp, A]]] = 
     runRequestInternal(connection)(NonEmptyList.of(input), key).map(_.map(nel => RedisResult[A].decode(nel.head)))
 
-  def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String], key: Option[String]): Redis[F, A] = Redis(Kleisli{connection: RedisConnection[F] => 
+  def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String], key: Option[String]): Redis[F, A] = Redis(Kleisli{(connection: RedisConnection[F]) => 
     runRequest(connection)(input, key).map{ fE => 
       fE.flatMap{
         case Right(a) => a.pure[F]
@@ -97,7 +97,7 @@ object RedisConnection{
     }
   })
 
-  private[rediculous] def closeReturn[F[_]: MonadError[*[_], Throwable], A](fE: F[Either[Resp, A]]): F[A] = 
+  private[rediculous] def closeReturn[F[_]: MonadThrow, A](fE: F[Either[Resp, A]]): F[A] = 
     fE.flatMap{
         case Right(a) => a.pure[F]
         case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
@@ -191,7 +191,7 @@ object RedisConnection{
   ): Resource[F, RedisConnection[F]] = 
     for {
       keypool <- KeyPoolBuilder[F, (String, Int), (Socket[F], F[Unit])](
-        {t: (String, Int) => sg.client[F](new InetSocketAddress(t._1, t._2))
+        {(t: (String, Int)) => sg.client[F](new InetSocketAddress(t._1, t._2))
             .flatMap(elevateSocket(_, tlsContext, tlsParameters))
             .allocated
         },
@@ -319,7 +319,7 @@ object RedisConnection{
           Concurrent[F].start(fa.flatMap(a => deferred.complete(a).as(a)).attempt)
         )
       ){
-        fibers: NonEmptyList[Fiber[F, Either[Throwable, A]]] => 
+        (fibers: NonEmptyList[Fiber[F, Either[Throwable, A]]]) => 
           Concurrent[F].race(
             fibers.traverse(_.join).map(
                 _.traverse(_.swap).swap

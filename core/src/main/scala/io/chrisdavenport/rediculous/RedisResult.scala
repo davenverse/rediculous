@@ -46,7 +46,7 @@ object RedisResult extends RedisResultLowPriority{
     }
   }
 
-  implicit val redisType = new RedisResult[RedisProtocol.RedisType] {
+  implicit val redisType: RedisResult[RedisProtocol.RedisType] = new RedisResult[RedisProtocol.RedisType] {
     def decode(resp: Resp): Either[Resp,RedisProtocol.RedisType] = resp match {
       case Resp.SimpleString(value) => Either.right(value match {
         case "none" => RedisProtocol.RedisType.None

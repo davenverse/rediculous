@@ -23,12 +23,14 @@ object RedisPipeline {
   implicit val ctx: RedisCtx[RedisPipeline] =  new RedisCtx[RedisPipeline]{
     def keyed[A: RedisResult](key: String, command: NonEmptyList[String]): RedisPipeline[A] = 
       RedisPipeline(RedisTransaction.RedisTxState{for {
-        (i, base, value) <- State.get
+        s1 <- State.get[(Int, List[NonEmptyList[String]], Option[String])]
+        (i, base, value) = s1
         _ <- State.set((i + 1, command :: base, value.orElse(Some(key))))
       } yield RedisTransaction.Queued(l => RedisResult[A].decode(l(i)))})
 
     def unkeyed[A: RedisResult](command: NonEmptyList[String]): RedisPipeline[A] = RedisPipeline(RedisTransaction.RedisTxState{for {
-      (i, base, value) <- State.get
+      out <- State.get[(Int, List[NonEmptyList[String]], Option[String])]
+      (i, base, value) = out
       _ <- State.set((i + 1, command :: base, value))
     } yield RedisTransaction.Queued(l => RedisResult[A].decode(l(i)))})
   }
@@ -55,7 +57,7 @@ object RedisPipeline {
 
   class SendPipelinePartiallyApplied[F[_]]{
     def apply[A](tx: RedisPipeline[A])(implicit F: Concurrent[F]): Redis[F, A] = {
-      Redis(Kleisli{c: RedisConnection[F] => 
+      Redis(Kleisli{(c: RedisConnection[F]) => 
         val ((_, commandsR, key), RedisTransaction.Queued(f)) = tx.value.value.run((0, List.empty, None)).value
         val commands = commandsR.reverse.toNel
         commands.traverse(nelCommands => RedisConnection.runRequestInternal(c)(nelCommands, key) // We Have to Actually Send A Command
