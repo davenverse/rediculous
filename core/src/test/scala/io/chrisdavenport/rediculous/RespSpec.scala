@@ -187,7 +187,6 @@ class RespSpec extends munit.ScalaCheckSuite {
       val init = "*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*2\r\n+Foo\r\n-Bar\r\n"
       Resp.Array.parse(init.getBytes()).extract match {
         case Some(value) => 
-          val out: Resp.Array = value
           val expected = Resp.Array(Some(
             List(
               Resp.Array(Some(List(Resp.Integer(1), Resp.Integer(2), Resp.Integer(3)))),
