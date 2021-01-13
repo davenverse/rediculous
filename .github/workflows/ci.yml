@@ -67,7 +67,7 @@ jobs:
       - run: sbt ++${{ matrix.scala }} test mimaReportBinaryIssues
 
       - if: matrix.scala == '2.13.4'
-        run: sbt ++${{ matrix.scala }} docs/makeMicrosite
+        run: sbt ++${{ matrix.scala }} site/makeMicrosite
 
   publish:
     name: Publish Artifacts
@@ -123,4 +123,4 @@ jobs:
         run: sbt ++${{ matrix.scala }} ci-release
 
       - name: Publish microsite
-        run: sbt ++${{ matrix.scala }} ++2.13.4 docs/publishMicrosite
+        run: sbt ++${{ matrix.scala }} ++2.13.4 site/publishMicrosite
