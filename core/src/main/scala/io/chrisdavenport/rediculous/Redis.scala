@@ -4,7 +4,7 @@ import cats.data._
 import cats.implicits._
 import cats._
 import cats.effect._
-import cats.effect.MonadCancelThrow
+import cats.effect.kernel.MonadCancelThrow
 
 final case class Redis[F[_], A](unRedis: Kleisli[F, RedisConnection[F], F[A]]){
   def run(connection: RedisConnection[F])(implicit ev: Monad[F]): F[A] = {

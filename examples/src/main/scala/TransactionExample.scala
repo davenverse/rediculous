@@ -1,7 +1,6 @@
 import io.chrisdavenport.rediculous._
 import cats.implicits._
 import cats.effect._
-import fs2.io.tcp._
 import cats.effect.Resource
 
 // Send a Single Transaction to the Redis Server
