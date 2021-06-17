@@ -17,6 +17,9 @@ import _root_.io.chrisdavenport.rediculous.cluster.ClusterCommands
 import fs2.io.tls.TLSContext
 import fs2.io.tls.TLSParameters
 import _root_.io.chrisdavenport.rediculous.cluster.ClusterCommands.ClusterSlots
+import cats.MonadThrow
+import cats.effect.{ Deferred, MonadCancel, Ref, Temporal }
+import cats.effect.std.Semaphore
 
 sealed trait RedisConnection[F[_]]
 object RedisConnection{
@@ -116,7 +119,7 @@ object RedisConnection{
       out <- elevateSocket(socket, tlsContext, tlsParameters)
     } yield RedisConnection.DirectConnection(out)
 
-  def pool[F[_]: Concurrent: Timer: ContextShift](
+  def pool[F[_]: Concurrent: Temporal: ContextShift](
     sg: SocketGroup,
     host: String,
     port: Int,
@@ -129,7 +132,7 @@ object RedisConnection{
     ).build.map(PooledConnection[F](_))
 
   // Only allows 1k queued actions, before new actions block to be accepted.
-  def queued[F[_]: Concurrent: Timer: ContextShift](
+  def queued[F[_]: Concurrent: Temporal: ContextShift](
     sg: SocketGroup,
     host: String,
     port: Int,
@@ -139,7 +142,7 @@ object RedisConnection{
     tlsParameters: TLSParameters = TLSParameters.Default
   ): Resource[F, RedisConnection[F]] = 
     for {
-      queue <- Resource.liftF(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Resp)]](maxQueued))
+      queue <- Resource.eval(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Resp)]](maxQueued))
       keypool <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
         {_ => sg.client[F](new InetSocketAddress(host, port))
           .flatMap(elevateSocket(_, tlsContext, tlsParameters))
@@ -177,7 +180,7 @@ object RedisConnection{
           .background
     } yield Queued(queue, keypool.take(()).map(_.map(_._1)))
 
-  def cluster[F[_]: Concurrent: Parallel: Timer: ContextShift](
+  def cluster[F[_]: Concurrent: Parallel: Temporal: ContextShift](
     sg: SocketGroup,
     host: String,
     port: Int,
@@ -199,10 +202,10 @@ object RedisConnection{
       ).build
 
       // Cluster Topology Acquisition and Management
-      sockets <- Resource.liftF(keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_)))
-      now <- Resource.liftF(Clock[F].instantNow)
-      refreshLock <- Resource.liftF(Semaphore[F](1L))
-      refTopology <- Resource.liftF(Ref[F].of((sockets, now)))
+      sockets <- Resource.eval(keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_)))
+      now <- Resource.eval(Clock[F].instantNow)
+      refreshLock <- Resource.eval(Semaphore[F](1L))
+      refTopology <- Resource.eval(Ref[F].of((sockets, now)))
       refreshTopology = refreshLock.withPermit(
         (
           refTopology.get
@@ -224,7 +227,7 @@ object RedisConnection{
         }
       )
 
-      queue <- Resource.liftF(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Option[String], Option[(String, Int)], Int, Resp)]](maxQueued))
+      queue <- Resource.eval(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Option[String], Option[(String, Int)], Int, Resp)]](maxQueued))
       cluster = Cluster(queue)
       _ <- 
           queue.dequeue.chunks.map{chunkChunk =>
@@ -314,7 +317,7 @@ object RedisConnection{
   def raceN[F[_]: Concurrent, A](nel: NonEmptyList[F[A]]): F[Either[NonEmptyList[Throwable], A]] = {
     for {
       deferred <- Deferred[F, A]
-      out <- Bracket[F, Throwable].bracket(
+      out <- MonadCancel[F, Throwable].bracket(
         nel.traverse(fa =>
           Concurrent[F].start(fa.flatMap(a => deferred.complete(a).as(a)).attempt)
         )
