@@ -4,15 +4,20 @@ import cats.implicits._
 import io.chrisdavenport.rediculous._
 import cats.data.NonEmptyList
 import cats.effect._
+import com.comcast.ip4s._
 
 object ClusterCommands {
 
-  final case class ClusterServer(host: String, port: Int, id: String)
+  final case class ClusterServer(host: Host, port: Port, id: String)
   object ClusterServer {
     implicit val result: RedisResult[ClusterServer] = new RedisResult[ClusterServer]{
       def decode(resp: Resp): Either[Resp,ClusterServer] = resp match {
         case Resp.Array(Some(Resp.BulkString(Some(host)) :: Resp.Integer(l) :: Resp.BulkString(Some(id)) :: Nil)) => 
-          ClusterServer(host, l.toInt, id).asRight
+          Host.fromString(host).flatMap{host => 
+            Port.fromInt(l.toInt) .map{ port => 
+              ClusterServer(host, port, id)
+            }
+          }.toRight(resp)
         case e => e.asLeft
       }
     }
@@ -31,7 +36,7 @@ object ClusterCommands {
     }
   }
   final case class ClusterSlots(l: List[ClusterSlot]){
-    def served(bucket: Int): Option[(String, Int)] = 
+    def served(bucket: Int): Option[(Host, Port)] = 
       l.collectFirst{
         case ClusterSlot(start, end, master :: _) if start <= bucket && end >= bucket => (master.host, master.port) 
       }
@@ -44,7 +49,7 @@ object ClusterCommands {
       } else None
     }.flatMap{
       case Some(a) => Sync[F].pure(a)
-      case None => Sync[F].raiseError[(String, Int)](RedisError.Generic("Rediculous: No Servers Available"))
+      case None => Sync[F].raiseError[(Host, Port)](RedisError.Generic("Rediculous: No Servers Available"))
     }
   }
   object ClusterSlots {
