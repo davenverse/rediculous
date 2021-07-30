@@ -47,14 +47,14 @@ object Redis {
     def unwrap[F[_], A](fa: Type[F, A]): Redis[F, A] =
       fa.asInstanceOf[Redis[F, A]]
 
-    def parallel[F[_]]: Redis[F, *] ~> Par[F, *] = new ~>[Redis[F, *], Par[F, *]]{
+    def parallel[F[_]]: ({ type M[A] = Redis[F, A] })#M ~> ({ type M[A] = Par[F, A] })#M = new ~>[({ type M[A] = Redis[F, A] })#M, ({ type M[A] = Par[F, A] })#M]{
       def apply[A](fa: Redis[F,A]): Par[F,A] = Par(fa)
     }
-    def sequential[F[_]]: Par[F, *] ~> Redis[F, *] = new ~>[Par[F, *], Redis[F, *]]{
+    def sequential[F[_]]: ({ type M[A] = Par[F, A] })#M ~> ({ type M[A] = Redis[F, A] })#M = new ~>[({ type M[A] = Par[F, A] })#M, ({ type M[A] = Redis[F, A] })#M]{
       def apply[A](fa: Par[F,A]): Redis[F,A] = unwrap(fa)
     }
 
-    implicit def parApplicative[F[_]: Parallel: Monad]: Applicative[Par[F, *]] = new Applicative[Par[F, *]]{
+    implicit def parApplicative[F[_]: Parallel: Monad]: Applicative[({ type M[A] = Par[F, A] })#M] = new Applicative[({ type M[A] = Par[F, A] })#M]{
       def ap[A, B](ff: Par[F,A => B])(fa: Par[F,A]): Par[F,B] = Par(Redis(
         Par.unwrap(ff).unRedis.flatMap{ ff => 
           Par.unwrap(fa).unRedis.map{fa =>  Parallel[F].sequential(
@@ -69,10 +69,10 @@ object Redis {
 
   }
 
-  implicit def monad[F[_]: Monad]: Monad[Redis[F, *]] = new Monad[Redis[F, *]]{
+  implicit def monad[F[_]: Monad]: Monad[({ type M[A] = Redis[F, A] })#M] = new Monad[({ type M[A] = Redis[F, A] })#M]{
 
     def tailRecM[A, B](a: A)(f: A => Redis[F,Either[A,B]]): Redis[F,B] = Redis(
-      Monad[Kleisli[F, RedisConnection[F], *]].tailRecM[A, B](a)(f.andThen(_.unRedis.flatMap(fe => Kleisli.liftF(fe))))
+      Monad[({ type M[A] = Kleisli[F, RedisConnection[F], A]})#M].tailRecM[A, B](a)(f.andThen(_.unRedis.flatMap(fe => Kleisli.liftF(fe))))
         .map(_.pure[F])
     )
 
@@ -80,7 +80,7 @@ object Redis {
       fa.unRedis.flatMap(fa => 
         Kleisli.liftF[F, RedisConnection[F], A](fa)
           .flatMap(a =>
-            Monad[Kleisli[F, RedisConnection[F], *]].tailRecM[A, F[B]](a)(
+            Monad[({ type M[A] = Kleisli[F, RedisConnection[F], A]})#M].tailRecM[A, F[B]](a)(
               f.andThen(_.unRedis.flatMap(fe => Kleisli.liftF(fe.map(e => Either.right(e).map(_.pure[F])))))
             )
           )
@@ -92,15 +92,17 @@ object Redis {
     )
   }
 
-  implicit def parRedis[M[_]: Parallel: Concurrent]: Parallel[Redis[M, *]] = new Parallel[Redis[M, *]]{
+  implicit def parRedis[M[_]: Parallel: Concurrent]: Parallel[({ type L[A] = Redis[M, A] })#L] = new Parallel[({ type L[A] = Redis[M, A] })#L]{
+    
     type F[A] = Par[M, A]
-
-    def sequential: Par[M, *] ~> Redis[M, *] = Par.sequential[M]
     
-    def parallel: Redis[M, *] ~> Par[M, *] = Par.parallel[M]
+    def sequential: F ~> ({ type L[X] = Redis[M, X] })#L =
+      Par.sequential[M]
     
-    def applicative: Applicative[Par[M, *]] = Par.parApplicative[M] 
+    def parallel: ({ type L[A] = Redis[M, A] })#L ~> F = Par.parallel[M]
     
-    def monad: Monad[Redis[M,*]] = Redis.monad[M]
+    def applicative: Applicative[F] = Par.parApplicative[M] 
+    
+    def monad: Monad[({ type L[A] = Redis[M, A] })#L] = Redis.monad[M]
   }
 }

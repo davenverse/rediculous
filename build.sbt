@@ -7,9 +7,8 @@ val fs2V = "3.0-117-375521f"
 
 val munitCatsEffectV = "1.0.5"
 
-ThisBuild / crossScalaVersions := Seq("2.12.16", "2.13.5")
+ThisBuild / crossScalaVersions := Seq("2.13.6", "3.0.0")
 ThisBuild / scalaVersion := crossScalaVersions.value.last
-
 
 // Projects
 lazy val `rediculous` = project.in(file("."))
@@ -39,8 +38,6 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
     )
   )
 
-import org.scalajs.linker.interface.ModuleInitializer
-
 lazy val examples = crossProject(JVMPlatform, JSPlatform)
   .crossType(CrossType.Pure)
   .in(file("examples"))
@@ -49,14 +46,15 @@ lazy val examples = crossProject(JVMPlatform, JSPlatform)
   .dependsOn(core)
   .settings(
     name := "rediculous-examples",
-    fork in run := true,
+    run / fork := true,
     scalaJSUseMainModuleInitializer := true,
   ).jsSettings(
     libraryDependencies ++= Seq(
-      "io.github.cquiroz" %%% "scala-java-time" % "2.2.2"
+      "io.github.cquiroz" %%% "scala-java-time" % "2.3.0"
     ),
     Compile / mainClass := Some("BasicExample"),
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)},
+    scalaJSStage in Global := FullOptStage,
   )
 lazy val examplesJVM = examples.jvm
 lazy val examplesJS = examples.js

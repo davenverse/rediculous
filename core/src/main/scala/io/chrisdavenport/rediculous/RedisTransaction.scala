@@ -82,7 +82,7 @@ object RedisTransaction {
   object RedisTxState {
 
     implicit val m: Monad[RedisTxState] = new StackSafeMonad[RedisTxState]{
-      def pure[A](a: A): RedisTxState[A] = RedisTxState(Monad[State[(Int, List[NonEmptyList[String]], Option[String]), *]].pure(a))
+      def pure[A](a: A): RedisTxState[A] = RedisTxState(Monad[({ type F[A] = State[(Int, List[NonEmptyList[String]], Option[String]), A]})#F].pure(a))
       def flatMap[A, B](fa: RedisTxState[A])(f: A => RedisTxState[B]): RedisTxState[B] = RedisTxState(
         fa.value.flatMap(f.andThen(_.value))
       )
@@ -107,10 +107,10 @@ object RedisTransaction {
   // Operations
   // ----------
   def watch[F[_]: Async](keys: List[String]): Redis[F, Status] = 
-    RedisCtx[Redis[F,*]].unkeyed(NonEmptyList("WATCH", keys))
+    RedisCtx[({ type M[A] = Redis[F, A] })#M].unkeyed(NonEmptyList("WATCH", keys))
 
   def unwatch[F[_]: Async]: Redis[F, Status] = 
-    RedisCtx[Redis[F,*]].unkeyed(NonEmptyList.of("UNWATCH"))
+    RedisCtx[({ type M[A] = Redis[F, A] })#M].unkeyed(NonEmptyList.of("UNWATCH"))
 
   def multiExec[F[_]] = new MultiExecPartiallyApplied[F]
   

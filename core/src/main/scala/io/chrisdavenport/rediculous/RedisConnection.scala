@@ -63,7 +63,7 @@ object RedisConnection{
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
       def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => Sync[F].delay(l.toNel.getOrElse(throw RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))))
       connection match {
-      case PooledConnection(pool) => pool.map(_._1).take(()).use{
+      case PooledConnection(pool) => Functor[({type M[A] = KeyPool[F, Unit, A]})#M].map(pool)(_._1).take(()).use{
         m => withSocket(m.value).attempt.flatTap{
           case Left(_) => m.canBeReused.set(Reusable.DontReuse)
           case _ => Applicative[F].unit
@@ -72,7 +72,9 @@ object RedisConnection{
       case DirectConnection(socket) => withSocket(socket).map(_.pure[F])
       case Queued(queue, _) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map((_, resp))).flatMap{ c => 
         queue.offer(c).as {
-          c.traverse(_._1.get).flatMap(_.sequence.traverse(l => Sync[F].delay(l.toNel.getOrElse(throw RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))))).rethrow
+          MonadThrow[F].rethrow(
+            c.traverse(_._1.get).flatMap(_.sequence.traverse(l => Sync[F].delay(l.toNel.getOrElse(throw RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input")))))
+          )
         }   
       }
       case Cluster(queue) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map((_, key, None, 0, resp))).flatMap{ c => 
@@ -152,7 +154,8 @@ object RedisConnection{
       _ <- 
           Stream.fromQueueUnterminatedChunk(queue).chunks.map{chunk =>
             val s = if (chunk.nonEmpty) {
-                Stream.eval(keypool.map(_._1).take(()).use{m =>
+                Stream.eval(
+                  Functor[({type M[A] = KeyPool[F, Unit, A]})#M].map(keypool)(_._1).take(()).use{m =>
                   val out = chunk.map(_._2)
                   explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
                     case Left(_) => m.canBeReused.set(Reusable.DontReuse)
@@ -171,12 +174,12 @@ object RedisConnection{
             } else {
               Stream.empty
             }
-            s ++ Stream.eval_(Concurrent[F].cede)
+            s ++ Stream.exec(Concurrent[F].cede)
           }.parJoin(workers) // Worker Threads
           .compile
           .drain
           .background
-    } yield Queued(queue, keypool.take(()).map(_.map(_._1)))
+    } yield Queued(queue, keypool.take(()).map(Functor[({type M[A] = Managed[F, A]})#M].map(_)(_._1)))
 
   def cluster[F[_]: Async](
     sg: SocketGroup[F],
@@ -200,7 +203,7 @@ object RedisConnection{
       ).build
 
       // Cluster Topology Acquisition and Management
-      sockets <- Resource.eval(keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_)))
+      sockets <- Resource.eval(keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[({ type M[A] = Redis[F, A] })#M].run(_)))
       now <- Resource.eval(Temporal[F].realTime.map(_.toMillis))
       refreshLock <- Resource.eval(Semaphore[F](1L))
       refTopology <- Resource.eval(Ref[F].of((sockets, now)))
@@ -219,7 +222,7 @@ object RedisConnection{
           case ((_, setAt), now) if setAt >= (now - cacheTopologySeconds.toMillis) => Applicative[F].unit
           case ((l, _), _) => 
             val nelActions: NonEmptyList[F[ClusterSlots]] = l.map{ case (host, port) => 
-              keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
+              keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[({ type M[A] = Redis[F, A] })#M].run(_))
             }
             raceNThrowFirst(nelActions)
               .flatMap(s => Clock[F].realTime.map(_.toMillis).flatMap(now => refTopology.set((s,now))))
@@ -238,7 +241,7 @@ object RedisConnection{
                   }.toSeq
                 ).evalMap{
                   case (server, rest) => 
-                    keypool.map(_._1).take(server).use{m =>
+                    Functor[({type M[A] = KeyPool[F, (Host, Port), A]})#M].map(keypool)(_._1).take(server).use{m =>
                       val out = Chunk.seq(rest.map(_._5))
                       explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
                         case Left(_) => m.canBeReused.set(Reusable.DontReuse)
@@ -289,7 +292,7 @@ object RedisConnection{
                 }
               }}.parJoin(parallelServerCalls) // Send All Acquired values simultaneously. Should be mostly IO awaiting callback
             } else Stream.empty
-            s ++ Stream.eval_(Async[F].cede)
+            s ++ Stream.exec(Async[F].cede)
           }.parJoin(workers)
             .compile
             .drain
@@ -297,7 +300,7 @@ object RedisConnection{
     } yield cluster
 
   private def elevateSocket[F[_]](socket: Socket[F], tlsContext: Option[TLSContext[F]], tlsParameters: TLSParameters): Resource[F, Socket[F]] = 
-    tlsContext.fold(Resource.pure[F, Socket[F]](socket))(c => c.client(socket, tlsParameters))
+    tlsContext.fold(Resource.pure[F, Socket[F]](socket))(c => c.clientBuilder(socket).withParameters(tlsParameters).build)
 
   // ASK 1234-2020 127.0.0.1:6381
   // MOVED 1234-2020 127.0.0.1:6381
