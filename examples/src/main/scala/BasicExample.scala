@@ -2,8 +2,9 @@
 import io.chrisdavenport.rediculous._
 import cats.implicits._
 import cats.effect._
-import fs2.io.tcp._
+import fs2.io.net._
 import fs2._
+import com.comcast.ip4s._
 import scala.concurrent.duration._
 
 // Mimics 150 req/s load with 4 operations per request.
@@ -13,12 +14,11 @@ object BasicExample extends IOApp {
 
   def run(args: List[String]): IO[ExitCode] = {
     val r = for {
-      blocker <- Blocker[IO]
-      sg <- SocketGroup[IO](blocker)
+      sg <- Network[IO].socketGroup()
       // maxQueued: How many elements before new submissions semantically block. Tradeoff of memory to queue jobs. 
       // Default 1000 is good for small servers. But can easily take 100,000.
       // workers: How many threads will process pipelined messages.
-      connection <- RedisConnection.queued[IO](sg, "localhost", 6379, maxQueued = 10000, workers = 2)
+      connection <- RedisConnection.queued[IO](sg, host"localhost", port"6379", maxQueued = 10000, workers = 2)
     } yield connection
 
     r.use {client =>

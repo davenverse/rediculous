@@ -2,7 +2,8 @@ import io.chrisdavenport.rediculous._
 import cats.implicits._
 import cats.data._
 import cats.effect._
-import fs2.io.tcp._
+import fs2.io.net._
+import com.comcast.ip4s._
 import io.chrisdavenport.rediculous.cluster.ClusterCommands
 
 /**
@@ -12,9 +13,9 @@ object ZTestApp extends IOApp {
 
   def run(args: List[String]): IO[ExitCode] = {
     val r = for {
-      blocker <- Blocker[IO]
-      sg <- SocketGroup[IO](blocker)
-      connection <- RedisConnection.pool[IO](sg, "localhost", 30001)
+
+      sg <- Network[IO].socketGroup()//(blocker)
+      connection <- RedisConnection.pool[IO](sg, host"localhost", port"30001")
     } yield connection
 
     r.use {con =>

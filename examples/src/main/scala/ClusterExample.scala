@@ -1,3 +1,4 @@
+/*
 import io.chrisdavenport.rediculous._
 import cats.implicits._
 import cats.effect._
@@ -49,3 +50,4 @@ object ClusterExample extends IOApp {
 
   }
 }
+*/
