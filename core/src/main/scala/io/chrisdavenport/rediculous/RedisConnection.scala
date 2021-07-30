@@ -201,7 +201,7 @@ object RedisConnection{
 
       // Cluster Topology Acquisition and Management
       sockets <- Resource.eval(keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_)))
-      now <- Resource.eval(Temporal[F].realTimeInstant)
+      now <- Resource.eval(Temporal[F].realTime.map(_.toMillis))
       refreshLock <- Resource.eval(Semaphore[F](1L))
       refTopology <- Resource.eval(Ref[F].of((sockets, now)))
       refreshTopology = refreshLock.permit.use(_ =>
@@ -213,16 +213,16 @@ object RedisConnection{
               else 
                 Applicative[F].pure((NonEmptyList.of((host, port)), setAt))
           },
-          Temporal[F].realTimeInstant
+          Temporal[F].realTime.map(_.toMillis)
         ).tupled
         .flatMap{
-          case ((_, setAt), now) if setAt.isAfter(now.minusSeconds(cacheTopologySeconds.toSeconds)) => Applicative[F].unit
+          case ((_, setAt), now) if setAt >= (now - cacheTopologySeconds.toMillis) => Applicative[F].unit
           case ((l, _), _) => 
             val nelActions: NonEmptyList[F[ClusterSlots]] = l.map{ case (host, port) => 
               keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
             }
             raceNThrowFirst(nelActions)
-              .flatMap(s => Clock[F].realTimeInstant.flatMap(now => refTopology.set((s,now))))
+              .flatMap(s => Clock[F].realTime.map(_.toMillis).flatMap(now => refTopology.set((s,now))))
         }
       )
       queue <- Resource.eval(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Option[String], Option[(Host, Port)], Int, Resp)]](maxQueued))

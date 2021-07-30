@@ -15,9 +15,9 @@ ThisBuild / scalaVersion := crossScalaVersions.value.last
 lazy val `rediculous` = project.in(file("."))
   .disablePlugins(MimaPlugin)
   .enablePlugins(NoPublishPlugin)
-  .aggregate(core.jvm, examples)
+  .aggregate(core.jvm, core.js, examples)
 
-lazy val core = crossProject(JVMPlatform)
+lazy val core = crossProject(JVMPlatform, JSPlatform)
   .crossType(CrossType.Pure)
   .in(file("core"))
   .settings(
