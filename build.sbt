@@ -15,7 +15,7 @@ ThisBuild / scalaVersion := crossScalaVersions.value.last
 lazy val `rediculous` = project.in(file("."))
   .disablePlugins(MimaPlugin)
   .enablePlugins(NoPublishPlugin)
-  .aggregate(core.jvm, core.js, examples)
+  .aggregate(core.jvm, core.js, examples.jvm, examples.js)
 
 lazy val core = crossProject(JVMPlatform, JSPlatform)
   .crossType(CrossType.Pure)
@@ -39,14 +39,27 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
     )
   )
 
-lazy val examples = project.in(file("examples"))
+import org.scalajs.linker.interface.ModuleInitializer
+
+lazy val examples = crossProject(JVMPlatform, JSPlatform)
+  .crossType(CrossType.Pure)
+  .in(file("examples"))
   .disablePlugins(MimaPlugin)
   .enablePlugins(NoPublishPlugin)
-  .dependsOn(core.jvm)
+  .dependsOn(core)
   .settings(
     name := "rediculous-examples",
-    fork in run := true
+    fork in run := true,
+    scalaJSUseMainModuleInitializer := true,
+  ).jsSettings(
+    libraryDependencies ++= Seq(
+      "io.github.cquiroz" %%% "scala-java-time" % "2.2.2"
+    ),
+    Compile / mainClass := Some("BasicExample"),
+    scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)},
   )
+lazy val examplesJVM = examples.jvm
+lazy val examplesJS = examples.js
 
 lazy val site = project.in(file("site"))
   .enablePlugins(DavenverseMicrositePlugin)

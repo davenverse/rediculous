@@ -14,11 +14,10 @@ object BasicExample extends IOApp {
 
   def run(args: List[String]): IO[ExitCode] = {
     val r = for {
-      sg <- Network[IO].socketGroup()
       // maxQueued: How many elements before new submissions semantically block. Tradeoff of memory to queue jobs. 
       // Default 1000 is good for small servers. But can easily take 100,000.
       // workers: How many threads will process pipelined messages.
-      connection <- RedisConnection.queued[IO](sg, host"localhost", port"6379", maxQueued = 10000, workers = 2)
+      connection <- RedisConnection.queued[IO](Network[IO], host"localhost", port"6379", maxQueued = 10000, workers = 2)
     } yield connection
 
     r.use {client =>
@@ -36,7 +35,7 @@ object BasicExample extends IOApp {
       val now = IO(java.time.Instant.now)
       (
         now,
-        Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2)).parJoin(15).take(1000000).compile.drain,
+        Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2)).parJoin(15).take(1000).compile.drain,
         now
       ).mapN{
         case (before, _, after) => (after.toEpochMilli() - before.toEpochMilli()).millis
