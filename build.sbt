@@ -7,8 +7,8 @@ val fs2V = "3.0-117-375521f"
 
 val munitCatsEffectV = "1.0.5"
 
-ThisBuild / crossScalaVersions := Seq("2.12.14", "2.13.6", "3.0.0")
-ThisBuild / scalaVersion := crossScalaVersions.value.last
+ThisBuild / crossScalaVersions := Seq("2.13.6", "3.0.0")
+ThisBuild / scalaVersion := crossScalaVersions.value.tail
 
 // Projects
 lazy val `rediculous` = project.in(file("."))
@@ -46,7 +46,7 @@ lazy val examples = crossProject(JVMPlatform, JSPlatform)
   .dependsOn(core)
   .settings(
     name := "rediculous-examples",
-    fork in run := true,
+    run / fork := true,
     scalaJSUseMainModuleInitializer := true,
   ).jsSettings(
     libraryDependencies ++= Seq(
