@@ -515,7 +515,7 @@ object RedisCommands {
   def setrange[F[_]: RedisCtx](key: String, offset: Long, value: String): F[Long] = 
     RedisCtx[F].keyed(key, NEL.of("SETRANGE", key.encode, offset.encode, value.encode))
 
-  def del[F[_]: RedisCtx: Applicative](key: String): F[Long] = 
+  def del[F[_]: RedisCtx](key: String): F[Long] = 
     RedisCtx[F].keyed(key, NEL("DEL", key.encode :: Nil))
 
   def hincrbyfloat[F[_]: RedisCtx](key: String,field: String,increment: Double): F[Double] = 
