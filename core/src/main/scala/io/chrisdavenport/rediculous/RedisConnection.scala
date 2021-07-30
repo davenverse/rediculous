@@ -171,7 +171,7 @@ object RedisConnection{
             } else {
               Stream.empty
             }
-            s ++ Stream.eval_(Concurrent[F].cede)
+            s ++ Stream.exec(Concurrent[F].cede)
           }.parJoin(workers) // Worker Threads
           .compile
           .drain
@@ -200,7 +200,7 @@ object RedisConnection{
       ).build
 
       // Cluster Topology Acquisition and Management
-      sockets <- Resource.eval(keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_)))
+      sockets <- Resource.eval(keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[({ type M[A] = Redis[F, A] })#M].run(_)))
       now <- Resource.eval(Temporal[F].realTime.map(_.toMillis))
       refreshLock <- Resource.eval(Semaphore[F](1L))
       refTopology <- Resource.eval(Ref[F].of((sockets, now)))
@@ -219,7 +219,7 @@ object RedisConnection{
           case ((_, setAt), now) if setAt >= (now - cacheTopologySeconds.toMillis) => Applicative[F].unit
           case ((l, _), _) => 
             val nelActions: NonEmptyList[F[ClusterSlots]] = l.map{ case (host, port) => 
-              keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
+              keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[({ type M[A] = Redis[F, A] })#M].run(_))
             }
             raceNThrowFirst(nelActions)
               .flatMap(s => Clock[F].realTime.map(_.toMillis).flatMap(now => refTopology.set((s,now))))
@@ -289,7 +289,7 @@ object RedisConnection{
                 }
               }}.parJoin(parallelServerCalls) // Send All Acquired values simultaneously. Should be mostly IO awaiting callback
             } else Stream.empty
-            s ++ Stream.eval_(Async[F].cede)
+            s ++ Stream.exec(Async[F].cede)
           }.parJoin(workers)
             .compile
             .drain
@@ -297,7 +297,7 @@ object RedisConnection{
     } yield cluster
 
   private def elevateSocket[F[_]](socket: Socket[F], tlsContext: Option[TLSContext[F]], tlsParameters: TLSParameters): Resource[F, Socket[F]] = 
-    tlsContext.fold(Resource.pure[F, Socket[F]](socket))(c => c.client(socket, tlsParameters))
+    tlsContext.fold(Resource.pure[F, Socket[F]](socket))(c => c.clientBuilder(socket).withParameters(tlsParameters).build)
 
   // ASK 1234-2020 127.0.0.1:6381
   // MOVED 1234-2020 127.0.0.1:6381

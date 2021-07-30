@@ -12,6 +12,8 @@ import scala.concurrent.duration._
 // Completes in <5 s
 object BasicExample extends IOApp {
 
+  type RedisIO[A] = Redis[IO, A]
+
   def run(args: List[String]): IO[ExitCode] = {
     val r = for {
       // maxQueued: How many elements before new submissions semantically block. Tradeoff of memory to queue jobs. 
@@ -22,11 +24,11 @@ object BasicExample extends IOApp {
 
     r.use {client =>
       val r = (
-        RedisCommands.ping[Redis[IO, *]],
-        RedisCommands.get[Redis[IO, *]]("foo"),
-        RedisCommands.set[Redis[IO, *]]("foo", "value"),
-        RedisCommands.get[Redis[IO, *]]("foo")
-      ).parTupled
+        RedisCommands.ping[RedisIO],
+        RedisCommands.get[RedisIO]("foo"),
+        RedisCommands.set[RedisIO]("foo", "value"),
+        RedisCommands.get[RedisIO]("foo")
+      ).tupled
 
       val r2= List.fill(10)(r.run(client)).parSequence.map{_.flatMap{
         case (_,_,_,_) => List((), (), (), ())
@@ -35,7 +37,8 @@ object BasicExample extends IOApp {
       val now = IO(java.time.Instant.now)
       (
         now,
-        Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2)).parJoin(15).take(1000).compile.drain,
+        // Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2)).parJoin(15).take(1000).compile.drain,
+        r2.void,
         now
       ).mapN{
         case (before, _, after) => (after.toEpochMilli() - before.toEpochMilli()).millis
