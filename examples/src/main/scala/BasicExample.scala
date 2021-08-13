@@ -12,8 +12,6 @@ import scala.concurrent.duration._
 // Completes in <5 s
 object BasicExample extends IOApp {
 
-  type RedisIO[A] = Redis[IO, A]
-
   def run(args: List[String]): IO[ExitCode] = {
     val r = for {
       // maxQueued: How many elements before new submissions semantically block. Tradeoff of memory to queue jobs. 

@@ -1,9 +1,9 @@
-/*
 import io.chrisdavenport.rediculous._
 import cats.implicits._
 import cats.effect._
 import fs2.Stream
-import fs2.io.tcp._
+import fs2.io.net._
+import com.comcast.ip4s._
 import scala.concurrent.duration._
 
 // Mimics 150 req/s load with 15 operations per request.
@@ -13,20 +13,18 @@ object ClusterExample extends IOApp {
 
   def run(args: List[String]): IO[ExitCode] = {
     val r = for {
-      blocker <- Blocker[IO]
-      sg <- SocketGroup[IO](blocker)
       // maxQueued: How many elements before new submissions semantically block.
       // Default 1000 is good for small servers. But can easily take 100,000.
-      connection <- RedisConnection.cluster[IO](sg, "localhost", 30001, maxQueued = 10000, workers = 2)
+      connection <- RedisConnection.cluster[IO](Network[IO], host"localhost", port"30001", maxQueued = 10000, workers = 2)
     } yield connection
 
     r.use {client =>
       def keyed(key: String) = (
-        RedisCommands.ping[Redis[IO, *]],
-        RedisCommands.del[Redis[IO, *]](key),
-        RedisCommands.get[Redis[IO, *]](key),
-        RedisCommands.set[Redis[IO, *]](key, "value"),
-        RedisCommands.get[Redis[IO, *]](key)
+        RedisCommands.ping[RedisIO],
+        RedisCommands.del[RedisIO](key),
+        RedisCommands.get[RedisIO](key),
+        RedisCommands.set[RedisIO](key, "value"),
+        RedisCommands.get[RedisIO](key)
       ).parTupled
 
       val r = (keyed("foo"), keyed("bar"), keyed("baz")).parTupled
@@ -50,4 +48,3 @@ object ClusterExample extends IOApp {
 
   }
 }
-*/
