@@ -6,6 +6,7 @@ import fs2.io.net._
 import fs2._
 import com.comcast.ip4s._
 import scala.concurrent.duration._
+import cats.effect.std._
 
 // Mimics 150 req/s load with 4 operations per request.
 // Completes 1,000,000 redis operations
@@ -17,7 +18,7 @@ object BasicExample extends IOApp {
       // maxQueued: How many elements before new submissions semantically block. Tradeoff of memory to queue jobs. 
       // Default 1000 is good for small servers. But can easily take 100,000.
       // workers: How many threads will process pipelined messages.
-      connection <- RedisConnection.queued[IO](Network[IO], host"localhost", port"6379", maxQueued = 10000, workers = 2)
+      connection <- RedisConnection.queued[IO](Network[IO], host"localhost", port"6379", maxQueued = 10000, workers = 1)
     } yield connection
 
     r.use {client =>
@@ -28,15 +29,12 @@ object BasicExample extends IOApp {
         RedisCommands.get[RedisIO]("foo")
       ).tupled
 
-      val r2= List.fill(10)(r.run(client)).parSequence.map{_.flatMap{
-        case (_,_,_,_) => List((), (), (), ())
-      }}
+      val r2= List.fill(10)(r.run(client)).parSequence
 
       val now = IO(java.time.Instant.now)
       (
         now,
-        Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2)).parJoin(15).take(1000).compile.drain,
-        // r2.void,
+        Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2)).parJoin(15).take(1000).compile.lastOrError.flatTap(Console[IO].println(_)),
         now
       ).mapN{
         case (before, _, after) => (after.toEpochMilli() - before.toEpochMilli()).millis
