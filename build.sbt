@@ -3,11 +3,11 @@ import sbtcrossproject.CrossPlugin.autoImport.{crossProject, CrossType}
 val catsV = "2.6.1"
 val catsEffectV = "3.2.0"
 // val fs2V = "3.0.6"
-val fs2V = "3.0-117-375521f"
+val fs2V = "3.1.0"
 
 val munitCatsEffectV = "1.0.5"
 
-ThisBuild / crossScalaVersions := Seq("2.13.6", "3.0.0")
+ThisBuild / crossScalaVersions := Seq("2.12.14","2.13.6", "3.0.0")
 ThisBuild / scalaVersion := crossScalaVersions.value.last
 
 // Projects
@@ -19,6 +19,7 @@ lazy val `rediculous` = project.in(file("."))
 lazy val core = crossProject(JVMPlatform, JSPlatform)
   .crossType(CrossType.Pure)
   .in(file("core"))
+  .settings(yPartial)
   .settings(
     name := "rediculous",
     testFrameworks += new TestFramework("munit.Framework"),
@@ -44,6 +45,7 @@ lazy val examples = crossProject(JVMPlatform, JSPlatform)
   .disablePlugins(MimaPlugin)
   .enablePlugins(NoPublishPlugin)
   .dependsOn(core)
+  .settings(yPartial)
   .settings(
     name := "rediculous-examples",
     run / fork := true,
@@ -69,3 +71,11 @@ lazy val site = project.in(file("site"))
       micrositeDescription := "Pure FP Redis Client",
     )
   }
+
+lazy val yPartial = 
+  Seq(
+    scalacOptions ++= {
+      if (scalaVersion.value.startsWith("2.12")) Seq("-Ypartial-unification")
+      else Seq()
+    }
+  )
