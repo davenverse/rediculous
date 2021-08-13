@@ -21,7 +21,7 @@ object RedisCommands {
   def linsertbefore[F[_]: RedisCtx](key: String, pivot: String, value: String): F[Long] = 
     RedisCtx[F].keyed(key, NEL.of("LINSERT", key.encode, "BEFORE", pivot.encode, value.encode))
 
-  def lisertafter[F[_]: RedisCtx](key: String, pivot: String, value: String): F[Long] = 
+  def linsertafter[F[_]: RedisCtx](key: String, pivot: String, value: String): F[Long] = 
     RedisCtx[F].keyed(key, NEL.of("LINSERT", key.encode, "AFTER", pivot.encode, value.encode))
 
   def getType[F[_]: RedisCtx](key: String): F[RedisType] = 
