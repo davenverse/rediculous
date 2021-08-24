@@ -51,7 +51,7 @@ object Resp {
     }
   }
 
-  def parseAll(arr: SArray[Byte]): RespParserResult[List[Resp]] = {
+  def parseAll(arr: SArray[Byte]): RespParserResult[List[Resp]] = { // TODO Investigate Performance Benchmarks with Chain
     val listBuffer = new mutable.ListBuffer[Resp]
     def loop(arr: SArray[Byte]): RespParserResult[List[Resp]] = {
       if (arr.isEmpty) ParseComplete(listBuffer.toList, arr)

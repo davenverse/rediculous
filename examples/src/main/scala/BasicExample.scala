@@ -22,19 +22,20 @@ object BasicExample extends IOApp {
     } yield connection
 
     r.use {client =>
+      val x: Redis[IO, RedisProtocol.Status] =  RedisCommands.ping[RedisIO]
       val r = (
-        RedisCommands.ping[RedisIO],
+        x, 
         RedisCommands.get[RedisIO]("foo"),
         RedisCommands.set[RedisIO]("foo", "value"),
         RedisCommands.get[RedisIO]("foo")
-      ).tupled
+      ).parTupled
 
       val r2= List.fill(10)(r.run(client)).parSequence
 
       val now = IO(java.time.Instant.now)
       (
         now,
-        Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2)).parJoin(15).take(1000).compile.lastOrError.flatTap(Console[IO].println(_)),
+        Stream(()).covary[IO].repeat.map(_ => Stream.evalSeq(r2)).parJoin(15).take(100000).compile.lastOrError.flatTap(Console[IO].println(_)),
         now
       ).mapN{
         case (before, _, after) => (after.toEpochMilli() - before.toEpochMilli()).millis

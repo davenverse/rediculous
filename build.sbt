@@ -8,7 +8,7 @@ val fs2V = "3.1.0"
 val munitCatsEffectV = "1.0.5"
 
 ThisBuild / crossScalaVersions := Seq("2.12.14","2.13.6", "3.0.0")
-ThisBuild / scalaVersion := crossScalaVersions.value.last
+ThisBuild / scalaVersion := "2.13.6"
 
 // Projects
 lazy val `rediculous` = project.in(file("."))
