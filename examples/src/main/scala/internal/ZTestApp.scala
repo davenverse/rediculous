@@ -17,7 +17,7 @@ object ZTestApp extends IOApp {
     } yield connection
 
     r.use {con =>
-      RedisConnection.runRequestTotal[IO, ClusterCommands.ClusterSlots](NonEmptyList.of("CLUSTER", "SLOTS"), None).unRedis.run(con).flatten
+      RedisConnection.runRequestTotal[IO, ClusterCommands.ClusterSlots](NonEmptyList.of("CLUSTER", "SLOTS"), None).unRedis.run(con)
       .flatTap(r => IO(println(r)))
     } >>
       IO.pure(ExitCode.Success)

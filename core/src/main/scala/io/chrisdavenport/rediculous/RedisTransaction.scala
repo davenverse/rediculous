@@ -124,11 +124,11 @@ object RedisTransaction {
           NonEmptyList.of("MULTI"),
           commands ++ 
           List(NonEmptyList.of("EXEC"))
-        ), key).map{_.flatMap{_.last match {
+        ), key).flatMap{_.last match {
           case Resp.Array(Some(a)) => f(a).fold[TxResult[A]](e => TxResult.Error(e.toString), TxResult.Success(_)).pure[F]
           case Resp.Array(None) => (TxResult.Aborted: TxResult[A]).pure[F]
           case other => ApplicativeError[F, Throwable].raiseError(RedisError.Generic(s"EXEC returned $other"))
-        }}}
+        }}
       })
     }
   }
