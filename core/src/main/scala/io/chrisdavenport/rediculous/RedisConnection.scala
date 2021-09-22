@@ -140,7 +140,8 @@ object RedisConnection{
     maxQueued: Int = 10000,
     workers: Int = 2,
     tlsContext: Option[TLSContext[F]] = None,
-    tlsParameters: TLSParameters = TLSParameters.Default
+    tlsParameters: TLSParameters = TLSParameters.Default,
+    chunkSizeLimit: Int = 250
   ): Resource[F, RedisConnection[F]] = 
     for {
       queue <- Resource.eval(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Resp)]](maxQueued))
@@ -152,7 +153,7 @@ object RedisConnection{
         { case (_, shutdown) => shutdown}
       ).build
       _ <- 
-          Stream.fromQueueUnterminatedChunk(queue).chunks.map{chunk =>
+          Stream.fromQueueUnterminatedChunk(queue, chunkSizeLimit).chunks.map{chunk =>
             val s = if (chunk.nonEmpty) {
                 Stream.eval(
                   Functor[({type M[A] = KeyPool[F, Unit, A]})#M].map(keypool)(_._1).take(()).use{m =>
@@ -192,6 +193,7 @@ object RedisConnection{
     tlsParameters: TLSParameters = TLSParameters.Default,
     useDynamicRefreshSource: Boolean = true, // Set to false to only use initially provided host for topology refresh
     cacheTopologySeconds: FiniteDuration = 1.second, // How long topology will not be rechecked for after a succesful refresh
+    chunkSizeLimit: Int = 250
   ): Resource[F, RedisConnection[F]] = 
     for {
       keypool <- KeyPoolBuilder[F, (Host, Port), (Socket[F], F[Unit])](
@@ -231,7 +233,7 @@ object RedisConnection{
       queue <- Resource.eval(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Option[String], Option[(Host, Port)], Int, Resp)]](maxQueued))
       cluster = Cluster(queue)
       _ <- 
-          Stream.fromQueueUnterminatedChunk(queue).chunks.map{chunk =>
+          Stream.fromQueueUnterminatedChunk(queue, chunkSizeLimit).chunks.map{chunk =>
             val s = if (chunk.nonEmpty) {
               Stream.eval(refTopology.get).map{ case (topo,_) => 
                 Stream.eval(topo.random[F]).flatMap{ default => 
