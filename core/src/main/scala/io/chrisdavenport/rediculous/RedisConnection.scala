@@ -155,12 +155,14 @@ object RedisConnection{
           Stream.fromQueueUnterminatedChunk(queue).chunks.map{chunk =>
             val s = if (chunk.nonEmpty) {
                 Stream.eval(
-                  Functor[({type M[A] = KeyPool[F, Unit, A]})#M].map(keypool)(_._1).take(()).use{m =>
-                  val out = chunk.map(_._2)
-                  explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
-                    case Left(_) => m.canBeReused.set(Reusable.DontReuse)
-                    case _ => Applicative[F].unit
-                  }
+                  Functor[({type M[A] = KeyPool[F, Unit, A]})#M].map(keypool)(_._1).take(()).attempt.use{
+                    case Right(m) =>
+                      val out = chunk.map(_._2)
+                      explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
+                        case Left(_) => m.canBeReused.set(Reusable.DontReuse)
+                        case _ => Applicative[F].unit
+                      }
+                    case l@Left(_) => l.rightCast[List[Resp]].pure[F]
                 }.flatMap{
                   case Right(n) => 
                     n.zipWithIndex.traverse_{
@@ -241,12 +243,14 @@ object RedisConnection{
                   }.toSeq
                 ).evalMap{
                   case (server, rest) => 
-                    Functor[({type M[A] = KeyPool[F, (Host, Port), A]})#M].map(keypool)(_._1).take(server).use{m =>
-                      val out = Chunk.seq(rest.map(_._5))
-                      explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
-                        case Left(_) => m.canBeReused.set(Reusable.DontReuse)
-                        case _ => Applicative[F].unit
-                      }
+                    Functor[({type M[A] = KeyPool[F, (Host, Port), A]})#M].map(keypool)(_._1).take(server).attempt.use{
+                      case Right(m) =>
+                        val out = Chunk.seq(rest.map(_._5))
+                        explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
+                          case Left(_) => m.canBeReused.set(Reusable.DontReuse)
+                          case _ => Applicative[F].unit
+                        }
+                      case l@Left(_) => l.rightCast[List[Resp]].pure[F]
                     }.flatMap{
                     case Right(n) => 
                       n.zipWithIndex.traverse_{
