@@ -114,8 +114,7 @@ object RedisConnection{
     val maxQueued = 10000
     val workers = 2
     val chunkSizeLimit = 256
-    // Number of 
-    val clusterParallelServerCalls: Int = Int.MaxValue
+    val clusterParallelServerCalls: Int = Int.MaxValue // Number of calls for cluster to execute in parallel against multiple server in a batch
     val clusterUseDynamicRefreshSource: Boolean = true // Set to false to only use initially provided host for topology refresh
     val clusterCacheTopologySeconds: FiniteDuration = 1.second // How long topology will not be rechecked for after a succesful refresh
   }

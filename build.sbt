@@ -22,6 +22,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
   .settings(yPartial)
   .settings(
     name := "rediculous",
+    mimaPreviousArtifacts := Set(), // Bincompat breaking till next release
     testFrameworks += new TestFramework("munit.Framework"),
 
     libraryDependencies ++= Seq(
