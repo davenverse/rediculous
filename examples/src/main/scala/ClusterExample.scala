@@ -15,7 +15,7 @@ object ClusterExample extends IOApp {
     val r = for {
       // maxQueued: How many elements before new submissions semantically block.
       // Default 1000 is good for small servers. But can easily take 100,000.
-      connection <- RedisConnection.cluster[IO](Network[IO], host"localhost", port"30001", maxQueued = 10000, workers = 2)
+      connection <- RedisConnection.cluster[IO].withHost(host"localhost").withPort(port"30001").withMaxQueued(maxQueued = 10000).withWorkers(workers = 2).build
     } yield connection
 
     r.use {client =>
