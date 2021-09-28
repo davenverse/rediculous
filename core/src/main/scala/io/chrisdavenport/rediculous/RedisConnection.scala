@@ -58,14 +58,14 @@ object RedisConnection{
     } else Applicative[F].pure(List.empty)
   }
 
-  def runRequestInternal[F[_]: Async](connection: RedisConnection[F])(
+  def runRequestInternal[F[_]: Concurrent](connection: RedisConnection[F])(
     inputs: NonEmptyList[NonEmptyList[String]],
     key: Option[String]
   ): F[NonEmptyList[Resp]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
-      def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => Sync[F].delay(l.toNel.getOrElse(throw RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))))
+      def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => (l.toNel.toRight(RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))).liftTo[F])
       def raiseNonEmpty(chunk: Chunk[Resp]): F[NonEmptyList[Resp]] = 
-        chunk.toNel.fold(RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input").raiseError[F, NonEmptyList[Resp]])(_.pure[F])
+        chunk.toNel.toRight(RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input")).liftTo[F]
       connection match {
       case PooledConnection(pool) => Functor[({type M[A] = KeyPool[F, Unit, A]})#M].map(pool)(_._1).take(()).use{
         m => withSocket(m.value).attempt.flatTap{
@@ -90,10 +90,10 @@ object RedisConnection{
   }
 
   // Can Be used to implement any low level protocols.
-  def runRequest[F[_]: Async, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], key: Option[String]): F[Either[Resp, A]] = 
+  def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], key: Option[String]): F[Either[Resp, A]] = 
     runRequestInternal(connection)(NonEmptyList.of(input), key).map(nel => RedisResult[A].decode(nel.head))
 
-  def runRequestTotal[F[_]: Async, A: RedisResult](input: NonEmptyList[String], key: Option[String]): Redis[F, A] = Redis(Kleisli{(connection: RedisConnection[F]) => 
+  def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String], key: Option[String]): Redis[F, A] = Redis(Kleisli{(connection: RedisConnection[F]) => 
     runRequest(connection)(input, key).flatMap{
       case Right(a) => a.pure[F]
       case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
@@ -128,7 +128,7 @@ object RedisConnection{
       TLSParameters.Default
     )
 
-  class DirectConnectionBuilder[F[_]] private[RedisConnection](
+  class DirectConnectionBuilder[F[_]: Async] private[RedisConnection](
     private val sg: SocketGroup[F],
     private val host: Host,
     private val port: Port,
@@ -295,7 +295,7 @@ object RedisConnection{
                           toSet.complete(Either.right(ref))
                       }
                     case e@Left(_) => 
-                      chunk.traverse_{ case (deff, _) => deff.complete(e.asInstanceOf[Either[Throwable, Resp]])}
+                      chunk.traverse_{ case (deff, _) => deff.complete(e.rightCast[Resp])}
                   }) 
               } else {
                 Stream.empty
@@ -481,7 +481,7 @@ object RedisConnection{
                   }
                 }}.parJoin(parallelServerCalls) // Send All Acquired values simultaneously. Should be mostly IO awaiting callback
               } else Stream.empty
-              s ++ Stream.exec(Async[F].cede)
+              s ++ Stream.exec(Concurrent[F].cede)
             }.parJoin(workers)
               .compile
               .drain
