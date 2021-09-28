@@ -13,7 +13,7 @@ object ZTestApp extends IOApp {
 
   def run(args: List[String]): IO[ExitCode] = {
     val r = for {
-      connection <- RedisConnection.pool[IO](Network[IO], host"localhost", port"30001")
+      connection <- RedisConnection.pool[IO].withHost(host"localhost").withPort(port"30001").build
     } yield connection
 
     r.use {con =>
