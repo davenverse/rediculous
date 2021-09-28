@@ -59,48 +59,48 @@ object RedisConnection{
   def runRequestInternal[F[_]: Async](connection: RedisConnection[F])(
     inputs: NonEmptyList[NonEmptyList[String]],
     key: Option[String]
-  ): F[F[NonEmptyList[Resp]]] = {
+  ): F[NonEmptyList[Resp]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
       def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => Sync[F].delay(l.toNel.getOrElse(throw RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))))
+      def raiseNonEmpty(chunk: Chunk[Resp]): F[NonEmptyList[Resp]] = 
+        chunk.toNel.fold(RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input").raiseError[F, NonEmptyList[Resp]])(_.pure[F])
       connection match {
       case PooledConnection(pool) => Functor[({type M[A] = KeyPool[F, Unit, A]})#M].map(pool)(_._1).take(()).use{
         m => withSocket(m.value).attempt.flatTap{
           case Left(_) => m.canBeReused.set(Reusable.DontReuse)
           case _ => Applicative[F].unit
         }
-      }.rethrow.map(_.pure[F])
-      case DirectConnection(socket) => withSocket(socket).map(_.pure[F])
+      }.rethrow
+      case DirectConnection(socket) => withSocket(socket)
       case Queued(queue, _) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map((_, resp))).flatMap{ c => 
-        queue.offer(c).as {
-          MonadThrow[F].rethrow(
-            c.traverse(_._1.get).flatMap(_.sequence.traverse(l => Sync[F].delay(l.toNel.getOrElse(throw RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input")))))
-          )
+        queue.offer(c) >> {
+          val x: F[Chunk[Either[Throwable, Resp]]] = c.traverse(_._1.get)
+          val y: F[Chunk[Resp]] = x.flatMap(_.sequence.liftTo[F])
+          y.flatMap(raiseNonEmpty)
         }   
       }
       case Cluster(queue) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map((_, key, None, 0, resp))).flatMap{ c => 
-        queue.offer(c).as {
-          c.traverse(_._1.get).flatMap(_.sequence.traverse(l => Sync[F].delay(l.toNel.getOrElse(throw RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))))).rethrow
+        queue.offer(c) >> {
+          c.traverse(_._1.get).flatMap(_.sequence.liftTo[F]).flatMap(raiseNonEmpty)
         }
       }   
     }
   }
 
   // Can Be used to implement any low level protocols.
-  def runRequest[F[_]: Async, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], key: Option[String]): F[F[Either[Resp, A]]] = 
-    runRequestInternal(connection)(NonEmptyList.of(input), key).map(_.map(nel => RedisResult[A].decode(nel.head)))
+  def runRequest[F[_]: Async, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], key: Option[String]): F[Either[Resp, A]] = 
+    runRequestInternal(connection)(NonEmptyList.of(input), key).map(nel => RedisResult[A].decode(nel.head))
 
   def runRequestTotal[F[_]: Async, A: RedisResult](input: NonEmptyList[String], key: Option[String]): Redis[F, A] = Redis(Kleisli{(connection: RedisConnection[F]) => 
-    runRequest(connection)(input, key).map{ fE => 
-      fE.flatMap{
-        case Right(a) => a.pure[F]
-        case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
-        case Left(other) => ApplicativeError[F, Throwable].raiseError[A](RedisError.Generic(s"Rediculous: Incompatible Return Type for Operation: ${input.head}, got: $other"))
-      }
+    runRequest(connection)(input, key).flatMap{
+      case Right(a) => a.pure[F]
+      case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
+      case Left(other) => ApplicativeError[F, Throwable].raiseError[A](RedisError.Generic(s"Rediculous: Incompatible Return Type for Operation: ${input.head}, got: $other"))
     }
   })
 
-  private[rediculous] def closeReturn[F[_]: MonadThrow, A](fE: F[Either[Resp, A]]): F[A] = 
-    fE.flatMap{
+  private[rediculous] def closeReturn[F[_]: MonadThrow, A](fE: Either[Resp, A]): F[A] = 
+    fE match {
         case Right(a) => a.pure[F]
         case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
         case Left(other) => ApplicativeError[F, Throwable].raiseError[A](RedisError.Generic(s"Rediculous: Incompatible Return Type: Got $other"))
@@ -140,7 +140,8 @@ object RedisConnection{
     maxQueued: Int = 10000,
     workers: Int = 2,
     tlsContext: Option[TLSContext[F]] = None,
-    tlsParameters: TLSParameters = TLSParameters.Default
+    tlsParameters: TLSParameters = TLSParameters.Default,
+    chunkSizeLimit: Int = 250
   ): Resource[F, RedisConnection[F]] = 
     for {
       queue <- Resource.eval(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Resp)]](maxQueued))
@@ -152,7 +153,7 @@ object RedisConnection{
         { case (_, shutdown) => shutdown}
       ).build
       _ <- 
-          Stream.fromQueueUnterminatedChunk(queue).chunks.map{chunk =>
+          Stream.fromQueueUnterminatedChunk(queue, chunkSizeLimit).chunks.map{chunk =>
             val s = if (chunk.nonEmpty) {
                 Stream.eval(
                   Functor[({type M[A] = KeyPool[F, Unit, A]})#M].map(keypool)(_._1).take(()).attempt.use{
@@ -194,6 +195,7 @@ object RedisConnection{
     tlsParameters: TLSParameters = TLSParameters.Default,
     useDynamicRefreshSource: Boolean = true, // Set to false to only use initially provided host for topology refresh
     cacheTopologySeconds: FiniteDuration = 1.second, // How long topology will not be rechecked for after a succesful refresh
+    chunkSizeLimit: Int = 250
   ): Resource[F, RedisConnection[F]] = 
     for {
       keypool <- KeyPoolBuilder[F, (Host, Port), (Socket[F], F[Unit])](
@@ -233,7 +235,7 @@ object RedisConnection{
       queue <- Resource.eval(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Option[String], Option[(Host, Port)], Int, Resp)]](maxQueued))
       cluster = Cluster(queue)
       _ <- 
-          Stream.fromQueueUnterminatedChunk(queue).chunks.map{chunk =>
+          Stream.fromQueueUnterminatedChunk(queue, chunkSizeLimit).chunks.map{chunk =>
             val s = if (chunk.nonEmpty) {
               Stream.eval(refTopology.get).map{ case (topo,_) => 
                 Stream.eval(topo.random[F]).flatMap{ default => 

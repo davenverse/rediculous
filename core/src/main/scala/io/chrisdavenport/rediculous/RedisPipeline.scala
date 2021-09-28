@@ -61,9 +61,10 @@ object RedisPipeline {
         val ((_, commandsR, key), RedisTransaction.Queued(f)) = tx.value.value.run((0, List.empty, None)).value
         val commands = commandsR.reverse.toNel
         commands.traverse(nelCommands => RedisConnection.runRequestInternal(c)(nelCommands, key) // We Have to Actually Send A Command
-          .map{fNel => RedisConnection.closeReturn(fNel.map(a => f(a.toList)))}
-        ).flatMap{fOpt => 
-          fOpt.map(_.pure[F]).getOrElse(F.raiseError(RedisError.Generic("Rediculous: Attempted to Pipeline Empty Command")))
+          .flatMap{nel => RedisConnection.closeReturn[F, A](f(nel.toList))}
+        ).flatMap{
+          case Some(a) => a.pure[F]
+          case None => F.raiseError(RedisError.Generic("Rediculous: Attempted to Pipeline Empty Command"))
         }
       })
     }
