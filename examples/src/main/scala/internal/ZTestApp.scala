@@ -12,15 +12,20 @@ import io.chrisdavenport.rediculous.cluster.ClusterCommands
 object ZTestApp extends IOApp {
 
   def run(args: List[String]): IO[ExitCode] = {
-    val r = for {
-      connection <- RedisConnection.pool[IO].withHost(host"localhost").withPort(port"30001").build
-    } yield connection
+    fs2.io.net.Network[IO].client(SocketAddress(host"localhost", port"6379")).flatMap(
+      s => 
 
-    r.use {con =>
-      RedisConnection.runRequestTotal[IO, ClusterCommands.ClusterSlots](NonEmptyList.of("CLUSTER", "SLOTS"), None).unRedis.run(con)
-      .flatTap(r => IO(println(r)))
-    } >>
-      IO.pure(ExitCode.Success)
+        RedisPubSub.socket(s).psubscribe("__key*__:*", {r => IO.println(r.toString())})
+    ).useForever.as(ExitCode.Success)
+    // val r = for {
+    //   connection <- RedisConnection.pool[IO].withHost(host"localhost").withPort(port"30001").build
+    // } yield connection
+
+    // r.use {con =>
+    //   RedisConnection.runRequestTotal[IO, ClusterCommands.ClusterSlots](NonEmptyList.of("CLUSTER", "SLOTS"), None).unRedis.run(con)
+    //   .flatTap(r => IO(println(r)))
+    // } >>
+    //   IO.pure(ExitCode.Success)
     
   }
 
