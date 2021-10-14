@@ -37,10 +37,7 @@ object RedisPubSub {
         _ => socket.write(Chunk.array(Resp.encode(Resp.renderRequest(NonEmptyList.of("punsubscribe", s))))).attempt.void
       ) *> {
         readMessages(List.empty, Array(), cb).background.void
-      }  *>       
-      Resource.make(socket.write(Chunk.array(Resp.encode(Resp.renderRequest(NonEmptyList.of("psubscribe", s + "s"))))))(
-        _ => socket.write(Chunk.array(Resp.encode(Resp.renderRequest(NonEmptyList.of("punsubscribe", s + "s"))))).attempt.void *> Temporal[F].sleep(1.second)
-      )
+      }
 
     def subscribe(s: String, cb: Resp => F[Unit]): Resource[F,Unit] = 
       Resource.make(socket.write(Chunk.array(Resp.encode(Resp.renderRequest(NonEmptyList.of("subscribe", s))))))(
