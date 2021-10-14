@@ -10,12 +10,14 @@ import io.chrisdavenport.rediculous.cluster.ClusterCommands
  * Test App For Development Purposes
  **/
 object ZTestApp extends IOApp {
+  val all = "__key*__:*"
+  val foo = "foo"
 
   def run(args: List[String]): IO[ExitCode] = {
     fs2.io.net.Network[IO].client(SocketAddress(host"localhost", port"6379")).flatMap(
       s => 
 
-        RedisPubSub.socket(s).psubscribe("__key*__:*", {r => IO.println(r.toString())})
+        RedisPubSub.socket(s).psubscribe(foo, {r => IO.println(r.toString())})
     ).useForever.as(ExitCode.Success)
     // val r = for {
     //   connection <- RedisConnection.pool[IO].withHost(host"localhost").withPort(port"30001").build
