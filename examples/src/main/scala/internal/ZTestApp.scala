@@ -10,15 +10,18 @@ import io.chrisdavenport.rediculous.cluster.ClusterCommands
  * Test App For Development Purposes
  **/
 object ZTestApp extends IOApp {
-  val all = "__key*__:*"
+  val all = "__keyspace*__:*"
   val foo = "foo"
 
   def run(args: List[String]): IO[ExitCode] = {
-    fs2.io.net.Network[IO].client(SocketAddress(host"localhost", port"6379")).flatMap(
+    fs2.io.net.Network[IO].client(SocketAddress(host"localhost", port"6379")).use{
       s => 
-
-        RedisPubSub.socket(s).psubscribe(foo, {r => IO.println(r.toString())})
-    ).useForever.as(ExitCode.Success)
+        val alg = RedisPubSub.socket(s, {r => IO.println(s"other: $r")}, Ref.unsafe[IO, Map[String, RedisPubSub.PubSubMessage => IO[Unit]]](Map()))
+        alg.psubscribe(all, {r => IO.println("p: " + r.toString())}) >>
+        alg.subscribe(foo, {r  => IO.println("s: " + r.toString())}) >>
+        alg.ping >>
+        alg.runMessages
+    }.as(ExitCode.Success)
     // val r = for {
     //   connection <- RedisConnection.pool[IO].withHost(host"localhost").withPort(port"30001").build
     // } yield connection
