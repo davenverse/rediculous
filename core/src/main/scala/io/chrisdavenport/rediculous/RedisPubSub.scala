@@ -151,12 +151,18 @@ object RedisPubSub {
 
     def ping: F[Unit] = sockets.traverse_(_.write(Chunk.array(Resp.encode(Resp.renderRequest(NonEmptyList.of("ping"))))))
   
-    def runMessages: F[Unit] = 
-      Stream.emits(sockets)
+    def runMessages: F[Unit] = sockets match {
+      case Nil => 
+        Applicative[F].unit
+      case head :: Nil =>
+        readMessages(head, Array())
+      case otherwise => 
+        Stream.emits(otherwise)
         .covary[F]
         .parEvalMap(Int.MaxValue)(readMessages(_, Array()))
         .compile
         .drain
+    }
   }
 
 
@@ -168,7 +174,7 @@ object RedisPubSub {
         Resource.eval(Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())).flatMap(ref => 
           Resource.makeCase(socket(managed.value :: Nil, maxBytes, onNonMessage, onUnhandledMessage, ref).pure[F]){
             case (_, Resource.ExitCase.Errored(_)) | (_, Resource.ExitCase.Canceled) => managed.canBeReused.set(Reusable.DontReuse)
-            case _ => Applicative[F].unit
+            case (pubsub, Resource.ExitCase.Succeeded) =>  pubsub.unsubscribeAll
           }
         )
       }
@@ -177,13 +183,15 @@ object RedisPubSub {
         Resource.eval(Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())).flatMap(ref => 
           Resource.makeCase(socket(managed.value :: Nil, maxBytes, onNonMessage, onUnhandledMessage, ref).pure[F]){
             case (_, Resource.ExitCase.Errored(_)) | (_, Resource.ExitCase.Canceled) => managed.canBeReused.set(Reusable.DontReuse)
-            case _ => Applicative[F].unit
+            case (pubsub, Resource.ExitCase.Succeeded) =>  pubsub.unsubscribeAll
           }
         )
       }
     case RedisConnection.DirectConnection(s) => 
-      Resource.eval(Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())).map(ref => 
-        socket(s :: Nil, maxBytes, onNonMessage, onUnhandledMessage, ref)
+      Resource.eval(Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())).flatMap(ref => 
+        Resource.make(socket(s :: Nil, maxBytes, onNonMessage, onUnhandledMessage, ref).pure[F]){
+          pubsub => pubsub.unsubscribeAll
+        }
       )
     case RedisConnection.Cluster(_, topology, sockets) => 
       Resource.eval(Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())).flatMap{ref => 
@@ -194,7 +202,7 @@ object RedisPubSub {
           usedSockets.flatMap(list => 
             Resource.makeCase(socket(list.map(_.value), maxBytes, onNonMessage, onUnhandledMessage, ref).pure[F]){
               case (_, Resource.ExitCase.Errored(_)) | (_, Resource.ExitCase.Canceled) => list.traverse_(managed => managed.canBeReused.set(Reusable.DontReuse))
-              case (_, _) => Applicative[F].unit
+              case (pubsub, Resource.ExitCase.Succeeded) =>  pubsub.unsubscribeAll
             }
           )
         }
