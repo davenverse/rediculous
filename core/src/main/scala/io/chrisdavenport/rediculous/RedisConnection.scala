@@ -22,13 +22,14 @@ import fs2.io.net.SocketGroupCompanionPlatform
 sealed trait RedisConnection[F[_]]
 object RedisConnection{
   
-  private case class Queued[F[_]](queue: Queue[F, Chunk[(Deferred[F, Either[Throwable, Resp]], Resp)]], usePool: Resource[F, Managed[F, Socket[F]]]) extends RedisConnection[F]
-  private case class PooledConnection[F[_]](
+  private[rediculous] case class Queued[F[_]](queue: Queue[F, Chunk[(Deferred[F, Either[Throwable, Resp]], Resp)]], usePool: Resource[F, Managed[F, Socket[F]]]) extends RedisConnection[F]
+  private[rediculous] case class PooledConnection[F[_]](
     pool: KeyPool[F, Unit, (Socket[F], F[Unit])]
   ) extends RedisConnection[F]
-  private case class DirectConnection[F[_]](socket: Socket[F]) extends RedisConnection[F]
 
-  private case class Cluster[F[_]](queue: Queue[F, Chunk[(Deferred[F, Either[Throwable, Resp]], Option[String], Option[(Host, Port)], Int, Resp)]]) extends RedisConnection[F]
+  private[rediculous] case class DirectConnection[F[_]](socket: Socket[F]) extends RedisConnection[F]
+
+  private[rediculous] case class Cluster[F[_]](queue: Queue[F, Chunk[(Deferred[F, Either[Throwable, Resp]], Option[String], Option[(Host, Port)], Int, Resp)]], slots: F[ClusterSlots], usePool: (Host, Port) => Resource[F, Managed[F, Socket[F]]]) extends RedisConnection[F]
 
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
@@ -81,7 +82,7 @@ object RedisConnection{
           y.flatMap(raiseNonEmpty)
         }   
       }
-      case Cluster(queue) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map((_, key, None, 0, resp))).flatMap{ c => 
+      case Cluster(queue, _, _) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map((_, key, None, 0, resp))).flatMap{ c => 
         queue.offer(c) >> {
           c.traverse(_._1.get).flatMap(_.sequence.liftTo[F]).flatMap(raiseNonEmpty)
         }
@@ -416,7 +417,7 @@ object RedisConnection{
           }
         )
         queue <- Resource.eval(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Option[String], Option[(Host, Port)], Int, Resp)]](maxQueued))
-        cluster = Cluster(queue)
+        cluster = Cluster(queue, refTopology.get.map(_._1), {case(host, port) => keypool.take((host, port)).map(_.map(_._1))})
         _ <- 
             Stream.fromQueueUnterminatedChunk(queue, chunkSizeLimit).chunks.map{chunk =>
               val s = if (chunk.nonEmpty) {

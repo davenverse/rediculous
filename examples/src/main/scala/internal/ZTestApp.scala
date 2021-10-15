@@ -14,9 +14,10 @@ object ZTestApp extends IOApp {
   val foo = "foo"
 
   def run(args: List[String]): IO[ExitCode] = {
-    fs2.io.net.Network[IO].client(SocketAddress(host"localhost", port"6379")).use{
-      s => 
-        val alg = RedisPubSub.socket(s, {r => IO.println(s"other: $r")}, Ref.unsafe[IO, Map[String, RedisPubSub.PubSubMessage => IO[Unit]]](Map()))
+    RedisConnection.queued[IO].withHost(host"localhost").withPort(port"6379").withMaxQueued(10000).withWorkers(workers = 1).build.flatMap{
+      connection => 
+        RedisPubSub.fromConnection(connection, 4096, {r => IO.println(s"other: $r")}, {r => IO.println(s"unhandled: $r")})
+    }.use{ alg => 
         alg.psubscribe(all, {r => IO.println("p: " + r.toString())}) >>
         alg.subscribe(foo, {r  => IO.println("s: " + r.toString())}) >>
         alg.ping >>
