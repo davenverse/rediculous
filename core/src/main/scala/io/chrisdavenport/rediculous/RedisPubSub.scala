@@ -13,8 +13,10 @@ import org.typelevel.keypool.Reusable
 
 trait RedisPubSub[F[_]]{
   def psubscribe(s: String, cb: RedisPubSub.PubSubMessage.PMessage => F[Unit]): F[Unit]
-  def punsubscribe(s: String): F[Unit] 
+  def psubscriptions: F[List[String]]
+  def punsubscribe(s: String): F[Unit]
   def subscribe(s: String, cb: RedisPubSub.PubSubMessage.Message => F[Unit]): F[Unit]
+  def subscriptions: F[List[String]]
   def unsubscribe(s: String): F[Unit]
   def unsubscribeAll: F[Unit]
   def ping: F[Unit]
@@ -62,14 +64,26 @@ object RedisPubSub {
   }
 
   private def socket[F[_]: Concurrent](sockets: List[Socket[F]], maxBytes: Int, onNonMessage: PubSubReply => F[Unit], onUnhandledMessage: PubSubMessage => F[Unit], cbStorage: Ref[F, Map[String, PubSubMessage => F[Unit]]]): RedisPubSub[F] = new RedisPubSub[F] {
-    val subPrefix = "csubscribed:"
-    val pSubPrefix = "psubscribed:"
+    val subPrefix = "cs:"
+    val pSubPrefix = "ps:"
 
-    def unsubscribeAll: F[Unit] = cbStorage.get.map(_.keys.toList).map{list => 
-      val channelSubscriptions = list.collect{ case x if x.startsWith("c") => x.drop(12)}
-      val patternSubscriptions = list.collect{ case x if x.startsWith("p") => x.drop(12)}
+    def unsubscribeAll: F[Unit] = cbStorage.get.map(_.keys.toList).flatMap{list => 
+      val channelSubscriptions = list.collect{ case x if x.startsWith("c") => x.drop(3)}
+      val patternSubscriptions = list.collect{ case x if x.startsWith("p") => x.drop(3)}
       channelSubscriptions.traverse_(unsubscribe) >>
       patternSubscriptions.traverse_(punsubscribe)
+    }
+
+    def subscriptions: F[List[String]] = {
+      cbStorage.get.map(_.keys.toList).map{list => 
+        list.collect{ case x if x.startsWith("c") => x.drop(3)}
+      }
+    }
+
+    def psubscriptions: F[List[String]] = {
+      cbStorage.get.map(_.keys.toList).map{list => 
+        list.collect{ case x if x.startsWith("p") => x.drop(3)}
+      }
     }
 
     def addSubscribe(key: String, effect: PubSubMessage.Message => F[Unit]): F[Boolean] = {
