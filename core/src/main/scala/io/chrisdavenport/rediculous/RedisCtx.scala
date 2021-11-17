@@ -1,7 +1,7 @@
 package io.chrisdavenport.rediculous
 
 import cats.data.NonEmptyList
-import cats.effect.Async
+import cats.effect.Concurrent
 import scala.annotation.implicitNotFound
 
 /**
@@ -22,7 +22,7 @@ object RedisCtx {
   
   def apply[F[_]](implicit ev: RedisCtx[F]): ev.type = ev
 
-  implicit def redis[F[_]: Async]: RedisCtx[({ type M[A] = Redis[F, A] })#M] = new RedisCtx[({ type M[A] = Redis[F, A] })#M]{
+  implicit def redis[F[_]: Concurrent]: RedisCtx[({ type M[A] = Redis[F, A] })#M] = new RedisCtx[({ type M[A] = Redis[F, A] })#M]{
     def keyed[A: RedisResult](key: String, command: NonEmptyList[String]): Redis[F,A] = 
       RedisConnection.runRequestTotal(command, Some(key))
     def unkeyed[A: RedisResult](command: NonEmptyList[String]): Redis[F, A] = 

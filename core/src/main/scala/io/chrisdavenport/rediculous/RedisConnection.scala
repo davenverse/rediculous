@@ -59,12 +59,12 @@ object RedisConnection{
     } else Applicative[F].pure(List.empty)
   }
 
-  def runRequestInternal[F[_]: Async](connection: RedisConnection[F])(
+  def runRequestInternal[F[_]: Concurrent](connection: RedisConnection[F])(
     inputs: NonEmptyList[NonEmptyList[String]],
     key: Option[String]
   ): F[NonEmptyList[Resp]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
-      def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => Sync[F].delay(l.toNel.getOrElse(throw RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))))
+      def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => l.toNel.toRight(RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input")).liftTo[F])
       def raiseNonEmpty(chunk: Chunk[Resp]): F[NonEmptyList[Resp]] = 
         chunk.toNel.fold(RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input").raiseError[F, NonEmptyList[Resp]])(_.pure[F])
       connection match {
@@ -91,10 +91,10 @@ object RedisConnection{
   }
 
   // Can Be used to implement any low level protocols.
-  def runRequest[F[_]: Async, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], key: Option[String]): F[Either[Resp, A]] = 
+  def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], key: Option[String]): F[Either[Resp, A]] = 
     runRequestInternal(connection)(NonEmptyList.of(input), key).map(nel => RedisResult[A].decode(nel.head))
 
-  def runRequestTotal[F[_]: Async, A: RedisResult](input: NonEmptyList[String], key: Option[String]): Redis[F, A] = Redis(Kleisli{(connection: RedisConnection[F]) => 
+  def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String], key: Option[String]): Redis[F, A] = Redis(Kleisli{(connection: RedisConnection[F]) => 
     runRequest(connection)(input, key).flatMap{
       case Right(a) => a.pure[F]
       case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
