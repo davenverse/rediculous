@@ -24,6 +24,8 @@ import org.typelevel.keypool.Reusable
  * holding up other messages being processed.
  **/
 trait RedisPubSub[F[_]]{
+  def publish(channel: String, message: String): F[Int]
+
   def psubscribe(s: String, cb: RedisPubSub.PubSubMessage.PMessage => F[Unit]): F[Unit]
   def psubscriptions: F[List[String]]
   def punsubscribe(s: String): F[Unit]
@@ -81,9 +83,12 @@ object RedisPubSub {
     }
   }
 
-  private def socket[F[_]: Concurrent](sockets: List[Socket[F]], maxBytes: Int, onNonMessage: Ref[F, PubSubReply => F[Unit]], onUnhandledMessage: Ref[F, PubSubMessage => F[Unit]], cbStorage: Ref[F, Map[String, PubSubMessage => F[Unit]]]): RedisPubSub[F] = new RedisPubSub[F] {
+  private def socket[F[_]: Concurrent](connection: RedisConnection[F], sockets: List[Socket[F]], maxBytes: Int, onNonMessage: Ref[F, PubSubReply => F[Unit]], onUnhandledMessage: Ref[F, PubSubMessage => F[Unit]], cbStorage: Ref[F, Map[String, PubSubMessage => F[Unit]]]): RedisPubSub[F] = new RedisPubSub[F] {
     val subPrefix = "cs:"
     val pSubPrefix = "ps:"
+
+    def publish(s: String, message: String): F[Int] = 
+      RedisCtx[Redis[F, *]].unkeyed[Int](cats.data.NonEmptyList.of("PUBLISH", s, message)).run(connection)
 
     def unsubscribeAll: F[Unit] = cbStorage.get.map(_.keys.toList).flatMap{list => 
       val channelSubscriptions = list.collect{ case x if x.startsWith("c") => x.drop(3)}
@@ -215,7 +220,7 @@ object RedisPubSub {
         val onNonMessageR = Concurrent[F].ref((_: PubSubReply) => Applicative[F].unit)
         val onUnhandledMessageR = Concurrent[F].ref((_: PubSubMessage) => Applicative[F].unit)
         Resource.eval((messagesR, onNonMessageR, onUnhandledMessageR).tupled).flatMap{case (ref, onNonMessage, onUnhandledMessage) => 
-          Resource.makeCase(socket(managed.value :: Nil, maxBytes, onNonMessage, onUnhandledMessage, ref).pure[F]){
+          Resource.makeCase(socket(connection, managed.value :: Nil, maxBytes, onNonMessage, onUnhandledMessage, ref).pure[F]){
             case (_, Resource.ExitCase.Errored(_)) | (_, Resource.ExitCase.Canceled) => managed.canBeReused.set(Reusable.DontReuse)
             case (pubsub, Resource.ExitCase.Succeeded) =>  pubsub.unsubscribeAll
           }
@@ -227,7 +232,7 @@ object RedisPubSub {
         val onNonMessageR = Concurrent[F].ref((_: PubSubReply) => Applicative[F].unit)
         val onUnhandledMessageR = Concurrent[F].ref((_: PubSubMessage) => Applicative[F].unit)
         Resource.eval((messagesR, onNonMessageR, onUnhandledMessageR).tupled).flatMap{case (ref, onNonMessage, onUnhandledMessage) => 
-          Resource.makeCase(socket(managed.value :: Nil, maxBytes, onNonMessage, onUnhandledMessage, ref).pure[F]){
+          Resource.makeCase(socket(connection, managed.value :: Nil, maxBytes, onNonMessage, onUnhandledMessage, ref).pure[F]){
             case (_, Resource.ExitCase.Errored(_)) | (_, Resource.ExitCase.Canceled) => managed.canBeReused.set(Reusable.DontReuse)
             case (pubsub, Resource.ExitCase.Succeeded) =>  pubsub.unsubscribeAll
           }
@@ -238,7 +243,7 @@ object RedisPubSub {
       val onNonMessageR = Concurrent[F].ref((_: PubSubReply) => Applicative[F].unit)
       val onUnhandledMessageR = Concurrent[F].ref((_: PubSubMessage) => Applicative[F].unit)
       Resource.eval((messagesR, onNonMessageR, onUnhandledMessageR).tupled).flatMap{case (ref, onNonMessage, onUnhandledMessage) => 
-      Resource.make(socket(s :: Nil, maxBytes, onNonMessage, onUnhandledMessage, ref).pure[F]){
+      Resource.make(socket(connection, s :: Nil, maxBytes, onNonMessage, onUnhandledMessage, ref).pure[F]){
         pubsub => pubsub.unsubscribeAll
       }
       }
@@ -252,7 +257,7 @@ object RedisPubSub {
           val usedServers = if (clusterBroadcast) servers else servers.head :: Nil
           val usedSockets: Resource[F, List[org.typelevel.keypool.Managed[F, Socket[F]]]] = usedServers.traverse{ case (host, port) => sockets(host, port) }
           usedSockets.flatMap(list => 
-            Resource.makeCase(socket(list.map(_.value), maxBytes, onNonMessage, onUnhandledMessage, ref).pure[F]){
+            Resource.makeCase(socket(connection, list.map(_.value), maxBytes, onNonMessage, onUnhandledMessage, ref).pure[F]){
               case (_, Resource.ExitCase.Errored(_)) | (_, Resource.ExitCase.Canceled) => list.traverse_(managed => managed.canBeReused.set(Reusable.DontReuse))
               case (pubsub, Resource.ExitCase.Succeeded) =>  pubsub.unsubscribeAll
             }

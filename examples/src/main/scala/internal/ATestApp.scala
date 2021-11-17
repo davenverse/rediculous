@@ -17,15 +17,15 @@ object ATestApp extends IOApp {
   def run(args: List[String]): IO[ExitCode] = {
     RedisConnection.queued[IO].withHost(host"localhost").withPort(port"6379").withMaxQueued(10000).withWorkers(workers = 1).build.flatMap{
       connection => 
-        RedisPubSub.fromConnection(connection, 4096)
-    }.use{ alg => 
+        RedisPubSub.fromConnection(connection, 4096).map(alg => (connection, alg))
+    }.use{ case(conn, alg) => 
         alg.nonMessages({r => IO.println(s"other: $r")}) >>
         alg.unhandledMessages({r => IO.println(s"unhandled: $r")}) >>
         alg.psubscribe(all, {r => IO.println("p: " + r.toString())}) >>
         alg.subscribe(foo, {r  => IO.println("s: " + r.toString())}) >> {
           (
             alg.runMessages,
-            alg.unsubscribe(foo),
+            alg.publish(foo, "Baz"),
             Temporal[IO].sleep(10.seconds) >> 
             alg.subscriptions.flatTap(IO.println(_)) >> 
             alg.psubscriptions.flatTap(IO.println(_))
