@@ -625,4 +625,7 @@ object RedisCommands {
   def sismember[F[_]: RedisCtx](key: String, member: String): F[Boolean] = 
     RedisCtx[F].keyed(key, NEL.of("SISMEMBER", key.encode, member.encode))
 
+  def publish[F[_]: RedisCtx](channel: String, message: String): F[Int] = 
+    RedisCtx[F].unkeyed[Int](cats.data.NonEmptyList.of("PUBLISH", channel, message))
+
 }
