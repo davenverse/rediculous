@@ -23,10 +23,11 @@ object ZTestApp extends IOApp {
         alg.subscribe(foo, {r  => IO.println("s: " + r.toString())}) >> {
           (
             alg.runMessages,
+            alg.unsubscribe(foo),
             Temporal[IO].sleep(10.seconds) >> 
             alg.subscriptions.flatTap(IO.println(_)) >> 
             alg.psubscriptions.flatTap(IO.println(_))
-          ).parMapN{ case (_, _) => ()} 
+          ).parMapN{ case (_, _, _) => ()} 
         }
     }.as(ExitCode.Success)
     // val r = for {

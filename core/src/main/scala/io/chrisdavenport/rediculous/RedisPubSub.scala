@@ -11,6 +11,18 @@ import scala.concurrent.duration._
 import _root_.io.chrisdavenport.rediculous.implicits._
 import org.typelevel.keypool.Reusable
 
+/**
+ * A RedisPubSub Represent an connection or group of connections
+ * communicating to the pubsub subsystem of Redis.
+ * 
+ * Only one caller should be responsible for runMessages, but delegation of how to handle errors
+ * and what to do when the connection closes or what state it closes is left to the user so they
+ * can determine what to do.
+ * 
+ * Subscription commands are run synchronous to matching subscriptions. If your operations
+ * need to take a long time please delegate them into a queue for handling without
+ * holding up other messages being processed.
+ **/
 trait RedisPubSub[F[_]]{
   def psubscribe(s: String, cb: RedisPubSub.PubSubMessage.PMessage => F[Unit]): F[Unit]
   def psubscriptions: F[List[String]]
@@ -33,9 +45,9 @@ object RedisPubSub {
   }
   sealed trait PubSubReply
   object PubSubReply {
-    case object Subscribed extends PubSubReply
+    case class Subscribed(subscription: String, subscriptionsCount: Int) extends PubSubReply
     case object Pong extends PubSubReply
-    case class Unsubscribed(subscriptionsLeft: Int) extends PubSubReply
+    case class Unsubscribed(subscription: String, subscriptionsCount: Int) extends PubSubReply
     case class Msg(message: PubSubMessage) extends PubSubReply
 
     implicit val resp: RedisResult[PubSubReply] = new RedisResult[PubSubReply] {
@@ -50,12 +62,14 @@ object RedisPubSub {
             case "pmessage" => 
               (r1.decode[String], r2.decode[String], rs.headOption.toRight(r).flatMap(_.decode[String]))
                 .mapN{ case (pattern, channel, message) => Msg(PubSubMessage.PMessage(pattern, channel, message))}
-            case "subscribe" => Subscribed.asRight
-            case "psubscribe" => Subscribed.asRight
+            case "subscribe" => 
+              (r1.decode[String], r2.decode[Int]).mapN(Subscribed(_, _))
+            case "psubscribe" => 
+              (r1.decode[String], r2.decode[Int]).mapN(Subscribed(_, _))
             case "unsubscribe" => 
-              r2.decode[Int].map(Unsubscribed(_))
+              (r1.decode[String], r2.decode[Int]).mapN(Unsubscribed(_, _))
             case "punsubscribe" =>
-              r2.decode[Int].map(Unsubscribed(_))
+              (r1.decode[String], r2.decode[Int]).mapN(Unsubscribed(_, _))
             case _ => r.asLeft
           }
         case otherwise => otherwise.asLeft
