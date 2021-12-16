@@ -197,7 +197,40 @@ object RedisCommands {
   
   // TODO Scan
   // TODO LEX
-  // TODO xadd
+
+  sealed trait Trimming
+  object Trimming {
+    case object Approximate extends Trimming
+    case object Exact extends Trimming
+    implicit val arg: RedisArg[Trimming] = RedisArg[String].contramap[Trimming]{
+      case Approximate => "~"
+      case Exact => "="
+    }
+  }
+  
+  final case class XAddOpts(
+    id: Option[String],
+    maxLength: Option[Long],
+    trimming: Option[Trimming],
+    noMkStream: Boolean,
+    minId: Option[String],
+    limit: Option[Long]
+  )
+  object XAddOpts {
+    val default = XAddOpts(None, None, None, false, None, None)
+  }
+
+  def xadd[F[_]: RedisCtx](stream: String, map: Map[String, String], xaddOpts: XAddOpts = XAddOpts.default): F[String] = {
+    val maxLen = xaddOpts.maxLength.toList.flatMap{ l => List("MAXLEN".some, xaddOpts.trimming.map(_.encode), l.encode.some).flattenOption }
+    val minId = xaddOpts.minId.toList.flatMap{ l => List("MINID".some, xaddOpts.trimming.map(_.encode), l.encode.some).flattenOption }
+    val limit = xaddOpts.limit.toList.flatMap(l=> if (xaddOpts.trimming.contains(Trimming.Approximate)) List("LIMIT", l.encode) else List.empty)
+    val noMkStream = Alternative[List].guard(xaddOpts.noMkStream).as("NOMKSTREAM")
+    val id = List(xaddOpts.id.getOrElse("*"))
+    val body = map.foldLeft(List.empty[String]){ case (s, (k,v)) => s ::: List(k.encode, v.encode) }
+    
+    RedisCtx[F].unkeyed(NEL("XADD", stream :: maxLen ::: minId ::: limit ::: noMkStream ::: id ::: body))
+  }
+
   // TODO xread
 
   def xgroupcreate[F[_]: RedisCtx](stream: String, groupName: String, startId: String): F[Status] = 
