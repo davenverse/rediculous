@@ -63,6 +63,7 @@ object RedisConnection{
     inputs: NonEmptyList[NonEmptyList[String]],
     key: Option[String]
   ): F[NonEmptyList[Resp]] = {
+      
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
       def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => l.toNel.toRight(RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input")).liftTo[F])
       def raiseNonEmpty(chunk: Chunk[Resp]): F[NonEmptyList[Resp]] = 
