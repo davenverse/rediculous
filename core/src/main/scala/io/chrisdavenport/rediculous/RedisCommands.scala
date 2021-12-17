@@ -231,7 +231,40 @@ object RedisCommands {
     RedisCtx[F].unkeyed(NEL("XADD", stream :: maxLen ::: minId ::: limit ::: noMkStream ::: id ::: body))
   }
 
-  // TODO xread
+  final case class XReadOpts(
+    blockMillisecond: Option[Long],
+    count: Option[Long],
+    noAck: Boolean
+  )
+  object XReadOpts {
+    val default = XReadOpts(None, None, false)
+  }
+  
+  sealed trait StreamOffset {
+    def stream: String
+    def offset: String
+  }
+
+  object StreamOffset {
+    case class All(stream: String) extends StreamOffset {
+      override def offset: String = "0"
+    }
+    case class Latest(stream: String) extends StreamOffset {
+      override def offset: String = "$"
+    }
+    case class From(stream: String, offset: String) extends StreamOffset 
+  }
+
+  def xread[F[_]: RedisCtx](streams: Set[StreamOffset], xreadOpts: XReadOpts = XReadOpts.default): F[List[List[(String, List[List[(String, List[(String, String)])]])]]] = {
+    val block = xreadOpts.blockMillisecond.toList.flatMap(l => List("BLOCK", l.encode))
+    val count = xreadOpts.count.toList.flatMap(l => List("COUNT", l.encode))
+    val noAck = Alternative[List].guard(xreadOpts.noAck).as("NOACK")
+    val streamKeys = streams.map(_.stream.encode).toList
+    val streamOffsets = streams.map(_.offset.encode).toList
+    val streamPairs = "STREAMS" :: streamKeys ::: streamOffsets
+    
+    RedisCtx[F].unkeyed(NEL("XREAD", block ::: count ::: noAck ::: streamPairs))
+  }
 
   def xgroupcreate[F[_]: RedisCtx](stream: String, groupName: String, startId: String): F[Status] = 
     RedisCtx[F].unkeyed(NEL.of("XGROUP", "CREATE", stream, groupName, startId))
