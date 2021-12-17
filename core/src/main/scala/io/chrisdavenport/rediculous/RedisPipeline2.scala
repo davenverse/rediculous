@@ -5,7 +5,9 @@ import cats.implicits._
 import cats.data.{NonEmptyList, Chain, Nested, Kleisli}
 import cats.effect._
 
-case class RedisPipeline2[F[_], A](value: F[Ref[F, (Chain[NonEmptyList[String]], Option[String])] => F[RedisTransaction.Queued[A]]])
+case class RedisPipeline2[F[_], A](value: F[Ref[F, (Chain[NonEmptyList[String]], Option[String])] => F[RedisTransaction.Queued[A]]]){
+  def pipeline(implicit ev: Concurrent[F]): Redis[F, A] = RedisPipeline2.toRedis[F, A](this)
+}
 
 object RedisPipeline2 {
 
@@ -15,9 +17,12 @@ object RedisPipeline2 {
         ref.modify{
           case (base, value) => 
             val newCommands = base.append(command)
-            (newCommands, value.orElse(Some(key))) -> newCommands.size
+            (newCommands, value.orElse(Some(key))) -> base.size
         }.map(i => 
-          RedisTransaction.Queued(l => RedisResult[A].decode(l(i.toInt)))
+          RedisTransaction.Queued{l => 
+            val out = RedisResult[A].decode(l(i.toInt))
+            out
+          }
         )
     })
 
@@ -26,7 +31,7 @@ object RedisPipeline2 {
         ref.modify{
           case (base, value) => 
             val newCommands = base.append(command)
-            (newCommands, value) -> newCommands.size
+            (newCommands, value) -> base.size
         }.map(i => 
           RedisTransaction.Queued(l => RedisResult[A].decode(l(i.toInt)))
         )
@@ -62,7 +67,10 @@ object RedisPipeline2 {
                 val commands = chain.toList.toNel
                 commands.traverse(nelCommands => 
                   RedisConnection.runRequestInternal(connection)(nelCommands, key) // We Have to Actually Send A Command
-                  .flatMap{nel => RedisConnection.closeReturn[F, A](queued.f(nel.toList))}
+                  .flatMap{nel => 
+                    println(s"Got back nel: $nel")
+                    RedisConnection.closeReturn[F, A](queued.f(nel.toList))
+                  }
                 ).flatMap{
                   case Some(a) => a.pure[F]
                   case None => Concurrent[F].raiseError(RedisError.Generic("Rediculous: Attempted to Pipeline Empty Command"))
