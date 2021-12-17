@@ -49,12 +49,12 @@ object RedisConnection{
         }
     }
     if (calls.nonEmpty){
-      val arrayB = new scala.collection.mutable.ArrayBuffer[Byte]
+      val buffer = scala.collection.mutable.ArrayBuilder.make[Byte]
         calls.toList.foreach{
           case resp => 
-            arrayB.++=(Resp.encode(resp))
+            buffer.++=(Resp.encode(resp))
         }
-      socket.write(Chunk.array(arrayB.toArray)) >>
+      socket.write(Chunk.array(buffer.result())) >>
       getTillEqualSize(List.empty, Array.emptyByteArray)
     } else Applicative[F].pure(List.empty)
   }

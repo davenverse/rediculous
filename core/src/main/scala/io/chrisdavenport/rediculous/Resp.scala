@@ -87,7 +87,12 @@ object Resp {
   case class SimpleString(value: String) extends Resp
   object SimpleString {
     def encode(s: SimpleString): SArray[Byte] = {
-      SArray(Plus) ++ s.value.getBytes(StandardCharsets.UTF_8) ++ CRLF
+      val sA = s.value.getBytes(StandardCharsets.UTF_8)
+      val buffer = new mutable.ArrayBuffer[Byte](sA.size + 3)
+      buffer.append(Plus)
+      buffer.++=(sA)
+      buffer.++=(CRLF)
+      buffer.toArray
     }
     def parse(arr: SArray[Byte]): RespParserResult[SimpleString] = {
       var idx = 1
@@ -164,13 +169,20 @@ object Resp {
   // $3/r/n/foo/r/n
   case class BulkString(value: Option[String]) extends Resp
   object BulkString {
+    private val empty = SArray(Dollar) ++ MinusOne ++ CRLF
     def encode(b: BulkString): SArray[Byte] = {
       b.value match {
-        case None => SArray(Dollar) ++ MinusOne ++ CRLF
+        case None => empty
         case Some(s) => {
           val bytes = s.getBytes(StandardCharsets.UTF_8)
-          SArray(Dollar) ++ bytes.size.toString.getBytes(StandardCharsets.UTF_8) ++ CRLF ++ 
-          bytes ++ CRLF
+          val size = bytes.size.toString.getBytes(StandardCharsets.UTF_8)
+          val buffer = mutable.ArrayBuilder.make[Byte]
+          buffer.+=(Dollar)
+          buffer.++=(size)
+          buffer.++=(CRLF)
+          buffer.++=(bytes)
+          buffer.++=(CRLF)
+          buffer.result()
         }
       }
     }
@@ -203,7 +215,7 @@ object Resp {
   case class Array(a: Option[List[Resp]]) extends Resp
   object Array {
     def encode(a: Array): SArray[Byte] = {
-      val buffer = new mutable.ArrayBuffer[Byte]
+      val buffer = mutable.ArrayBuilder.make[Byte]
       buffer += Star
       a.a match {
         case None => 
@@ -216,7 +228,7 @@ object Resp {
             buffer ++= Resp.encode(resp)
           )
       }
-      buffer.toArray
+      buffer.result()
     }
     def parse(arr: SArray[Byte]): RespParserResult[Array] = {
       var idx = 1
