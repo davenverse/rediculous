@@ -255,7 +255,7 @@ object RedisCommands {
     case class From(stream: String, offset: String) extends StreamOffset 
   }
 
-  def xread[F[_]: RedisCtx](streams: Set[StreamOffset], xreadOpts: XReadOpts = XReadOpts.default): F[List[List[(String, List[List[(String, List[(String, String)])]])]]] = {
+  def xread[F[_]: RedisCtx](streams: Set[StreamOffset], xreadOpts: XReadOpts = XReadOpts.default): F[Option[List[List[(String, List[List[(String, List[(String, String)])]])]]]] = {
     val block = xreadOpts.blockMillisecond.toList.flatMap(l => List("BLOCK", l.encode))
     val count = xreadOpts.count.toList.flatMap(l => List("COUNT", l.encode))
     val noAck = Alternative[List].guard(xreadOpts.noAck).as("NOACK")

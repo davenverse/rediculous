@@ -49,32 +49,39 @@ object StreamProducerExample extends IOApp {
   }
 
   def run(args: List[String]): IO[ExitCode] = {
-    val r = for {
-      // maxQueued: How many elements before new submissions semantically block. Tradeoff of memory to queue jobs. 
-      // Default 10000 is good for small servers. But can easily take 100,000.
-      // workers: How many threads will process pipelined messages.
-      connection <- RedisConnection.queued[IO].withHost(host"localhost").withPort(port"6379").withMaxQueued(maxQueued = 10000).withWorkers(workers = 2).build
-    } yield connection
+    val mystream = "mystream"
 
-    r
-      .flatMap{ client => 
-        Stream
-          .awakeEvery[IO](10.micro)
-          .evalMap(_ => randomMessage)
-          .groupWithin(10000, 1.milli)
-          .evalMap{ chunk => 
-            // Send a Single Set of Pipelined Commands to the Redis Server
-            val r = chunk.traverse(body => RedisCommands.xadd[RedisPipeline]("mystream", body))
-            val multi = r.pipeline[IO]
-            multi.run(client)
-          }
-          .unchunks
-          .logAverageRate(rate => IO.println(s"Producer rate: $rate"))
-          .compile
-          .drain
-          .background
+    RedisConnection.pool[IO].withHost(host"localhost").withPort(port"6379").build
+      .map(RedisStream.fromConnection[IO])
+      .use { rs => 
+        val consumer = rs
+          .read(Set(mystream), 10000)
+          .evalMap(putStrLn)
+          .onError(err => Stream.exec(IO.println(s"Consumer err: $err")))
+          .logAverageRate(rate => IO.println(s"Consumer rate: $rate/s"))
+
+        val producer = 
+          Stream
+            .repeatEval(IO.pure(Map("test" -> "test")))
+            .map(XAddMessage(mystream, _))
+            .chunkMin(10000)
+            .flatMap{ chunk => 
+              Stream.evalSeq(rs.append(chunk.toList))
+            }
+            .onError(err => Stream.exec(IO.println(s"Producer err: $err")))
+            .logAverageRate(rate => IO.println(s"Producer rate: $rate/s"))
+
+        val stream = 
+          // Stream.exec( RedisCommands.del[RedisPipeline]("mystream").pipeline[IO].run(client).void) ++
+          Stream.exec(IO.println("Started")) ++
+            consumer
+              .concurrently(producer) 
+              .interruptAfter(7.second)
+
+          // Stream.eval( RedisCommands.xlen[RedisPipeline]("mystream").pipeline[IO].run(client).flatMap(length => IO.println(s"Finished: $length")))
+
+        stream.compile.count.flatTap(l => putStrLn(s"Length: $l"))
       }
-      .use(combined => IO.never)
       .redeem(
         { t =>
           IO.println(s"Error: $t, Something went wrong")
