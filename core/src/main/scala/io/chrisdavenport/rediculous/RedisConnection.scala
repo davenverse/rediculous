@@ -40,8 +40,11 @@ object RedisConnection{
         ApplicativeError[F, Throwable].raiseError[List[Resp]](RedisError.Generic("Rediculous: Terminated Before reaching Equal size"))
       case Some(bytes) => 
         Resp.parseAll(lastArr.toArray ++ bytes.toIterable) match {
-          case e@Resp.ParseError(_, _) => ApplicativeError[F, Throwable].raiseError[List[Resp]](e)
-          case Resp.ParseIncomplete(arr) => getTillEqualSize(acc, arr)
+          case e@Resp.ParseError(_, _) => 
+            ApplicativeError[F, Throwable].raiseError[List[Resp]](e)
+          case Resp.ParseIncomplete(arr) => 
+            println(s"INCOMPLETE")
+            getTillEqualSize(acc, lastArr.toArray ++ bytes.toIterable)
           case Resp.ParseComplete(value, rest) => 
             if (value.size + acc.foldMap(_.size) === calls.size) (value ::acc ).reverse.flatten.pure[F]
             else getTillEqualSize(value :: acc, rest)
