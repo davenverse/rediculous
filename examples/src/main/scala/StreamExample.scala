@@ -62,7 +62,7 @@ object StreamProducerExample extends IOApp {
 
         val producer = 
           Stream
-            .repeatEval(IO.pure(Map("test" -> "test")))
+            .repeatEval(randomMessage)
             .map(XAddMessage(mystream, _))
             .chunkMin(10000)
             .flatMap{ chunk => 
