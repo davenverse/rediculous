@@ -4,6 +4,7 @@ import cats._
 import cats.implicits._
 import cats.data._
 import cats.effect._
+import fs2.Chunk
 import RedisProtocol._
 
 
@@ -88,7 +89,7 @@ object RedisTransaction {
       )
     }
   }
-  final case class Queued[A](f: List[Resp] => Either[Resp, A])
+  final case class Queued[A](f: Chunk[Resp] => Either[Resp, A])
   object Queued {
     implicit val m: Monad[Queued] = new StackSafeMonad[Queued]{
       def pure[A](a: A) = Queued{_ => Either.right(a)}
@@ -125,7 +126,7 @@ object RedisTransaction {
           commands ++ 
           List(NonEmptyList.of("EXEC"))
         ), key).flatMap{_.last match {
-          case Resp.Array(Some(a)) => f(a).fold[TxResult[A]](e => TxResult.Error(e.toString), TxResult.Success(_)).pure[F]
+          case Resp.Array(Some(a)) => f(Chunk.seq(a)).fold[TxResult[A]](e => TxResult.Error(e.toString), TxResult.Success(_)).pure[F]
           case Resp.Array(None) => (TxResult.Aborted: TxResult[A]).pure[F]
           case other => ApplicativeError[F, Throwable].raiseError(RedisError.Generic(s"EXEC returned $other"))
         }}
