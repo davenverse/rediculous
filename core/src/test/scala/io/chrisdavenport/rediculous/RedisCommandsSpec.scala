@@ -22,9 +22,10 @@ class RedisCommandsSpec extends CatsEffectSuite {
       )
   ).flatMap(container => 
     for {
-      (hostS, portI) <- Resource.eval(
+      t <- Resource.eval(
         container.ports.get(6379).liftTo[IO](new Throwable("Missing Port"))
       )
+      (hostS, portI) = t
       host <- Resource.eval(Host.fromString(hostS).liftTo[IO](new Throwable("Invalid Host")))
       port <- Resource.eval(Port.fromInt(portI).liftTo[IO](new Throwable("Invalid Port")))
       connection <- RedisConnection.pool[IO].withHost(host).withPort(port).build
