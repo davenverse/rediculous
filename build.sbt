@@ -37,10 +37,12 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
 
       "org.typelevel"               %%% "munit-cats-effect-3"        % munitCatsEffectV         % Test,
       "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.7" % Test,
-      "org.scalameta"               %%% "munit-scalacheck"            % "0.7.27" % Test
+      "org.scalameta"               %%% "munit-scalacheck"            % "0.7.27" % Test,
     )
   ).jsSettings(
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)}
+  ).jvmSettings(
+    libraryDependencies += "com.github.jnr" % "jnr-unixsocket" % "0.38.15" % Test,
   )
 
 lazy val examples = crossProject(JVMPlatform, JSPlatform)
