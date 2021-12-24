@@ -98,7 +98,7 @@ object RedisConnection{
     runRequest(connection)(input, key).flatMap{
       case Right(a) => a.pure[F]
       case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
-      case Left(other) => ApplicativeError[F, Throwable].raiseError[A](RedisError.Generic(s"Rediculous: Incompatible Return Type for Operation: ${input.head}, got: $other"))
+      case Left(other) => ApplicativeError[F, Throwable].raiseError[A](RedisError.Generic(s"Rediculous: Incompatible Return Type for Operation: ${input.head}, got:\n${Resp.toStringRedisCLI(other)}"))
     }
   })
 
@@ -106,7 +106,7 @@ object RedisConnection{
     fE match {
         case Right(a) => a.pure[F]
         case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
-        case Left(other) => ApplicativeError[F, Throwable].raiseError[A](RedisError.Generic(s"Rediculous: Incompatible Return Type: Got $other"))
+        case Left(other) => ApplicativeError[F, Throwable].raiseError[A](RedisError.Generic(s"Rediculous: Incompatible Return Type, got\n${Resp.toStringRedisCLI(other)}"))
       }
 
   object Defaults {

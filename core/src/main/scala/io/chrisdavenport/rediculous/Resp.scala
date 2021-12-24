@@ -5,6 +5,7 @@ import cats.data.NonEmptyList
 import cats.implicits._
 import scala.util.control.NonFatal
 import java.nio.charset.StandardCharsets
+import java.nio.charset.Charset
 
 sealed trait Resp
 
@@ -49,6 +50,25 @@ object Resp {
       case b@BulkString(_) => BulkString.encode(b)
       case a@Array(_) => Array.encode(a)
     }
+  }
+
+  def toStringProtocol(resp: Resp)(implicit C: Charset = StandardCharsets.UTF_8) = 
+    new String(encode(resp), C)
+
+  def toStringRedisCLI(resp: Resp, depth: Int = 0): String = resp match {
+    case BulkString(Some(value)) => s""""$value""""
+    case BulkString(None) => "(empty bulk string)"
+    case SimpleString(value) => s""""$value""""
+    case Integer(long) => s"(integer) $long"
+    case Error(value) => s"(error) $value"
+    case Array(None) => "(empty array)"
+    case Array(Some(a)) => 
+      a.zipWithIndex.map{ case (a, i) => (a, i + 1)}
+        .map{ case (resp, i) => 
+          val whitespace = if (i > 1) List.fill(depth * 3)(" ").mkString  else ""
+          whitespace ++ s"$i) ${toStringRedisCLI(resp, depth + 1)}"
+        }.mkString("\n")
+    
   }
 
   def parseAll(arr: SArray[Byte]): RespParserResult[List[Resp]] = { // TODO Investigate Performance Benchmarks with Chain
