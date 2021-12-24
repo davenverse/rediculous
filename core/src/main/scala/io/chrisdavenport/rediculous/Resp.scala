@@ -56,7 +56,7 @@ object Resp {
     def loop(arr: SArray[Byte]): RespParserResult[List[Resp]] = {
       if (arr.isEmpty) ParseComplete(listBuffer.toList, arr)
       else parse(arr) match {
-        case ParseIncomplete(out) => ParseComplete(listBuffer.toList, out)
+        case ParseIncomplete(out) => ParseIncomplete(out) 
         case ParseComplete(value, rest) =>
           listBuffer.append(value)
           loop(rest)
