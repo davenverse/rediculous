@@ -54,7 +54,7 @@ import io.chrisdavenport.rediculous.Resp._
           ))
       )
     ))
-    IO.println(Resp.printWith(resp))
+    IO.println(Resp.toStringRedisCLI(resp))
     }.as(ExitCode.Success)
     // val r = for {
     //   connection <- RedisConnection.pool[IO].withHost(host"localhost").withPort(port"30001").build
