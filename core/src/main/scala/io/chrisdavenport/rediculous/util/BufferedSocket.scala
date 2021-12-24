@@ -15,19 +15,26 @@ private[rediculous] trait BufferedSocket[F[_]] extends Socket[F]{
 private[rediculous] object BufferedSocket{
 
   def fromSocket[F[_]: Concurrent](s: Socket[F]): F[BufferedSocket[F]] = 
-    Queue.unbounded[F, Chunk[Byte]].map{q => new Impl(s, q)}
+    Ref[F].of(Option.empty[Chunk[Byte]]).map{r => new Impl(s, r)}
 
 
-  private class Impl[F[_]: Concurrent](socket: Socket[F], buffer: Queue[F, Chunk[Byte]]) extends BufferedSocket[F]{
-    def buffer(bytes: Chunk[Byte]): F[Unit] = buffer.offer(bytes)
+  private class Impl[F[_]: Concurrent](socket: Socket[F], buffer: Ref[F, Option[Chunk[Byte]]]) extends BufferedSocket[F]{
+    def buffer(bytes: Chunk[Byte]): F[Unit] = buffer.update{
+      case Some(b1) => (b1 ++ bytes).some
+      case None => bytes.some
+    }
+
+    def takeBuffer: F[Option[Chunk[Byte]]] = buffer.modify{
+      x => (None, x)
+    }
 
     // This can return more bytes than max bytes, may want to refine this later
-    def read(maxBytes: Int): F[Option[Chunk[Byte]]] = buffer.tryTake.flatMap{
+    def read(maxBytes: Int): F[Option[Chunk[Byte]]] = takeBuffer.flatMap{
       case s@Some(value) => value.some.pure[F]
       case None => socket.read(maxBytes)
     }
     
-    def readN(numBytes: Int): F[Chunk[Byte]] = buffer.tryTake.flatMap{
+    def readN(numBytes: Int): F[Chunk[Byte]] = takeBuffer.flatMap{
       case s@Some(value) => value.pure[F]
       case None => socket.readN(numBytes)
     }
