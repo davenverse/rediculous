@@ -33,20 +33,20 @@ class RedisCommandsSpec extends CatsEffectSuite {
     
   )
   // Not available on scala.js
-  // val redisConnection = ResourceSuiteLocalFixture(
-  //     "redisconnection",
-  //     resource
-  //   )
-  // override def munitFixtures: Seq[Fixture[_]] = Seq(
-  //   redisConnection
-  // )
-  val fixture = ResourceFixture(resource)
-  fixture.test("set a value"){ connection => 
-    // val connection = redisConnection()
-    val key = "foo"
-    val value = "bar"
-    val action = RedisCommands.set[RedisIO](key, value) >> RedisCommands.get[RedisIO](key)
-    action.run(connection).map{
+  val redisConnection = UnsafeResourceSuiteLocalDeferredFixture(
+      "redisconnection",
+      resource
+    )
+  override def munitFixtures: Seq[Fixture[_]] = Seq(
+    redisConnection
+  )
+  test("set a value"){ //connection => 
+    redisConnection().flatMap{connection => 
+      val key = "foo"
+      val value = "bar"
+      val action = RedisCommands.set[RedisIO](key, value) >> RedisCommands.get[RedisIO](key)
+      action.run(connection)
+    }.map{
       assertEquals(_, Some("bar"))
     }
   }
