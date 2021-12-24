@@ -88,11 +88,12 @@ object Resp {
   object SimpleString {
     def encode(s: SimpleString): SArray[Byte] = {
       val sA = s.value.getBytes(StandardCharsets.UTF_8)
-      val buffer = new mutable.ArrayBuffer[Byte](sA.size + 3)
-      buffer.append(Plus)
+      val buffer = mutable.ArrayBuilder.make[Byte]
+      buffer.sizeHint(sA.size + 3)
+      buffer.+=(Plus)
       buffer.++=(sA)
       buffer.++=(CRLF)
-      buffer.toArray
+      buffer.result()
     }
     def parse(arr: SArray[Byte]): RespParserResult[SimpleString] = {
       var idx = 1
