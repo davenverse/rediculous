@@ -56,9 +56,9 @@ object Resp {
     new String(encode(resp), C)
 
   def toStringRedisCLI(resp: Resp, depth: Int = 0): String = resp match {
-    case BulkString(Some(value)) => s"\"$value\""
+    case BulkString(Some(value)) => s""""$value""""
     case BulkString(None) => "(empty bulk string)"
-    case SimpleString(value) => s"\"$value\""
+    case SimpleString(value) => s""""$value""""
     case Integer(long) => s"(integer) $long"
     case Error(value) => s"(error) $value"
     case Array(None) => "(empty array)"
