@@ -5,9 +5,9 @@ val catsEffectV = "3.2.0"
 // val fs2V = "3.0.6"
 val fs2V = "3.1.0"
 
-val munitCatsEffectV = "1.0.5"
+val munitCatsEffectV = "1.0.7"
 
-ThisBuild / crossScalaVersions := Seq("2.12.14","2.13.6", "3.0.0")
+ThisBuild / crossScalaVersions := Seq("2.12.14","2.13.6", "3.1.0")
 ThisBuild / scalaVersion := "2.13.6"
 
 // Projects
@@ -36,8 +36,13 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
       "org.typelevel"               %%% "keypool"                    % "0.4.6",
 
       "org.typelevel"               %%% "munit-cats-effect-3"        % munitCatsEffectV         % Test,
-      "org.scalameta"               %%% "munit-scalacheck"            % "0.7.27" % Test
+      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.8" % Test,
+      "org.scalameta"               %%% "munit-scalacheck"            % "0.7.27" % Test,
     )
+  ).jsSettings(
+    scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)}
+  ).jvmSettings(
+    libraryDependencies += "com.github.jnr" % "jnr-unixsocket" % "0.38.15" % Test,
   )
 
 lazy val examples = crossProject(JVMPlatform, JSPlatform)
@@ -57,7 +62,7 @@ lazy val examples = crossProject(JVMPlatform, JSPlatform)
     ),
     Compile / mainClass := Some("BasicExample"),
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)},
-    scalaJSStage in Global := FullOptStage,
+    scalaJSStage := FullOptStage,
   )
 lazy val examplesJVM = examples.jvm
 lazy val examplesJS = examples.js
