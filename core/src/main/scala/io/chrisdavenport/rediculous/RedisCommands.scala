@@ -197,8 +197,115 @@ object RedisCommands {
   
   // TODO Scan
   // TODO LEX
-  // TODO xadd
-  // TODO xread
+
+    sealed trait Trimming
+  object Trimming {
+    case object Approximate extends Trimming
+    case object Exact extends Trimming
+    implicit val arg: RedisArg[Trimming] = RedisArg[String].contramap[Trimming]{
+      case Approximate => "~"
+      case Exact => "="
+    }
+  }
+
+  final case class XAddOpts(
+    id: Option[String],
+    maxLength: Option[Long],
+    trimming: Option[Trimming],
+    noMkStream: Boolean,
+    minId: Option[String],
+    limit: Option[Long]
+  )
+  object XAddOpts {
+    val default = XAddOpts(None, None, None, false, None, None)
+  }
+
+  def xadd[F[_]: RedisCtx](stream: String, map: List[(String, String)], xaddOpts: XAddOpts = XAddOpts.default): F[String] = {
+    val maxLen = xaddOpts.maxLength.toList.flatMap{ l => List("MAXLEN".some, xaddOpts.trimming.map(_.encode), l.encode.some).flattenOption }
+    val minId = xaddOpts.minId.toList.flatMap{ l => List("MINID".some, xaddOpts.trimming.map(_.encode), l.encode.some).flattenOption }
+    val limit = xaddOpts.limit.toList.flatMap(l=> if (xaddOpts.trimming.contains(Trimming.Approximate)) List("LIMIT", l.encode) else List.empty)
+    val noMkStream = Alternative[List].guard(xaddOpts.noMkStream).as("NOMKSTREAM")
+    val id = List(xaddOpts.id.getOrElse("*"))
+    val body = map.foldLeft(List.empty[String]){ case (s, (k,v)) => s ::: List(k.encode, v.encode) }
+
+    RedisCtx[F].unkeyed(NEL("XADD", stream :: maxLen ::: minId ::: limit ::: noMkStream ::: id ::: body))
+  }
+
+  final case class XReadOpts(
+    blockMillisecond: Option[Long],
+    count: Option[Long],
+    noAck: Boolean
+  )
+  object XReadOpts {
+    val default = XReadOpts(None, None, false)
+  }
+
+  sealed trait StreamOffset {
+    def stream: String
+    def offset: String
+  }
+
+  object StreamOffset {
+    case class All(stream: String) extends StreamOffset {
+      override def offset: String = "0"
+    }
+    case class Latest(stream: String) extends StreamOffset {
+      override def offset: String = "$"
+    }
+    case class From(stream: String, offset: String) extends StreamOffset 
+  }
+
+  case class StreamsRecord(
+    recordId: String,
+    keyValues: List[(String, String)]
+  )
+
+  object StreamsRecord {
+    implicit val result : RedisResult[StreamsRecord] = new RedisResult[StreamsRecord] {
+      def decode(resp: Resp): Either[Resp,StreamsRecord] = {
+        def two[A](l: List[A], acc: List[(A, A)] = List.empty): List[(A, A)] = l match {
+          case first :: second :: rest => two(rest, (first, second):: acc)
+          case otherwise => acc.reverse
+        }
+        resp match {
+          case  Resp.Array(Some(Resp.BulkString(Some(recordId)) :: Resp.Array(Some(rawKeyValues)) :: Nil)) => 
+            for {
+              keyValuesList <- rawKeyValues.traverse(RedisResult[String].decode).map(two(_))
+            } yield StreamsRecord(recordId, keyValuesList)
+          case otherwise => Left(otherwise)
+        }
+      }
+    }
+  }
+
+  case class XReadResponse(
+    stream: String,
+    records: List[StreamsRecord]
+  )
+  object XReadResponse{
+    implicit val result: RedisResult[XReadResponse] = new RedisResult[XReadResponse] {
+      def decode(resp: Resp): Either[Resp,XReadResponse] = {
+        resp match {
+          case Resp.Array(Some(Resp.BulkString(Some(stream)) :: Resp.Array(Some(list)) :: Nil)) => 
+            list.traverse(RedisResult[StreamsRecord].decode).map(l => 
+              XReadResponse(stream, l)
+            )
+          case otherwise => Left(otherwise)
+        }
+      }
+    }
+  }
+
+  def xread[F[_]: RedisCtx](streams: Set[StreamOffset], xreadOpts: XReadOpts = XReadOpts.default): F[Option[List[XReadResponse]]] = {//F[Option[List[List[(String, List[List[(String, List[(String, String)])]])]]]] = {
+    val block = xreadOpts.blockMillisecond.toList.flatMap(l => List("BLOCK", l.encode))
+    val count = xreadOpts.count.toList.flatMap(l => List("COUNT", l.encode))
+    val noAck = Alternative[List].guard(xreadOpts.noAck).as("NOACK")
+    val streamKeys = streams.map(_.stream.encode).toList
+    val streamOffsets = streams.map(_.offset.encode).toList
+    val streamPairs = "STREAMS" :: streamKeys ::: streamOffsets
+
+    RedisCtx[F].unkeyed(NEL("XREAD", block ::: count ::: noAck ::: streamPairs))
+  }
 
   def xgroupcreate[F[_]: RedisCtx](stream: String, groupName: String, startId: String): F[Status] = 
     RedisCtx[F].unkeyed(NEL.of("XGROUP", "CREATE", stream, groupName, startId))

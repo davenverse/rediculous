@@ -9,7 +9,7 @@ import _root_.io.chrisdavenport.whaletail.manager._
 import com.comcast.ip4s.Host
 import com.comcast.ip4s.Port
 
-class RedisCommandsSpec extends CatsEffectSuite {
+class RedisStreamSpec extends CatsEffectSuite {
   val resource = Docker.default[IO].flatMap(client => 
     WhaleTailContainer.build(client, "redis", "latest".some, Map(6379 -> None), Map.empty, Map.empty)
       .evalTap(
@@ -40,32 +40,24 @@ class RedisCommandsSpec extends CatsEffectSuite {
   override def munitFixtures: Seq[Fixture[_]] = Seq(
     redisConnection
   )
-  test("set/get parity"){ //connection => 
+  test("send a single message"){ //connection => 
+    val messages = List(
+      RedisStream.XAddMessage("foo", List("bar" -> "baz", "zoom" -> "zad"))
+    )
     redisConnection().flatMap{connection => 
-      val key = "foo"
-      val value = "bar"
-      val action = RedisCommands.set[RedisIO](key, value) >> 
-        RedisCommands.get[RedisIO](key) <* 
-        RedisCommands.del[RedisIO]("foo")
-      action.run(connection)
-    }.map{
-      assertEquals(_, Some("bar"))
+      
+      val rStream = RedisStream.fromConnection(connection)
+      rStream.append(messages) >>
+      rStream.read(Set("foo"), 512).take(1).compile.lastOrError
+
+    }.map{ xrr => 
+      val i = xrr.stream
+      assertEquals(xrr.stream, "foo")
+      val i2 = xrr.records.flatMap(sr => sr.keyValues)
+      assertEquals(i2, messages.flatMap(_.body))
     }
   }
 
-  test("xadd/xread parity"){
-    redisConnection().flatMap{ connection => 
-      val kv = "bar" -> "baz"
-      val action = RedisCommands.xadd[RedisIO]("foo", List(kv)) >>
-        RedisCommands.xread[RedisIO](Set(RedisCommands.StreamOffset.All("foo"))) <*
-        RedisCommands.del[RedisIO]("foo")
-
-      val extract = (resp: Option[List[RedisCommands.XReadResponse]]) => 
-        resp.flatMap(_.headOption).flatMap(_.records.headOption).flatMap(_.keyValues.headOption)
-
-      action.run(connection).map{ resp => 
-        assertEquals(extract(resp), Some(kv))
-      }
-    }
-  }
 }
+
+
