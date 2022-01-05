@@ -18,22 +18,23 @@ import fs2.io.net.tls.TLSParameters
 import java.time.Instant
 import _root_.io.chrisdavenport.rediculous.cluster.ClusterCommands.ClusterSlots
 import fs2.io.net.SocketGroupCompanionPlatform
+import util.BufferedSocket
 
 sealed trait RedisConnection[F[_]]
 object RedisConnection{
   
-  private[rediculous] case class Queued[F[_]](queue: Queue[F, Chunk[(Deferred[F, Either[Throwable, Resp]], Resp)]], usePool: Resource[F, Managed[F, Socket[F]]]) extends RedisConnection[F]
+  private[rediculous] case class Queued[F[_]](queue: Queue[F, Chunk[(Deferred[F, Either[Throwable, Resp]], Resp)]], usePool: Resource[F, Managed[F, BufferedSocket[F]]]) extends RedisConnection[F]
   private[rediculous] case class PooledConnection[F[_]](
-    pool: KeyPool[F, Unit, (Socket[F], F[Unit])]
+    pool: KeyPool[F, Unit, (BufferedSocket[F], F[Unit])]
   ) extends RedisConnection[F]
 
-  private[rediculous] case class DirectConnection[F[_]](socket: Socket[F]) extends RedisConnection[F]
+  private[rediculous] case class DirectConnection[F[_]](socket: BufferedSocket[F]) extends RedisConnection[F]
 
-  private[rediculous] case class Cluster[F[_]](queue: Queue[F, Chunk[(Deferred[F, Either[Throwable, Resp]], Option[String], Option[(Host, Port)], Int, Resp)]], slots: F[ClusterSlots], usePool: (Host, Port) => Resource[F, Managed[F, Socket[F]]]) extends RedisConnection[F]
+  private[rediculous] case class Cluster[F[_]](queue: Queue[F, Chunk[(Deferred[F, Either[Throwable, Resp]], Option[String], Option[(Host, Port)], Int, Resp)]], slots: F[ClusterSlots], usePool: (Host, Port) => Resource[F, Managed[F, BufferedSocket[F]]]) extends RedisConnection[F]
 
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
-  private[rediculous] def explicitPipelineRequest[F[_]: MonadThrow](socket: Socket[F], calls: Chunk[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[List[Resp]] = {
+  private[rediculous] def explicitPipelineRequest[F[_]: MonadThrow](socket: BufferedSocket[F], calls: Chunk[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[List[Resp]] = {
     def getTillEqualSize(acc: List[List[Resp]], lastArr: Array[Byte]): F[List[Resp]] = 
     socket.read(maxBytes).flatMap{
       case None => 
@@ -43,7 +44,7 @@ object RedisConnection{
           case e@Resp.ParseError(_, _) => ApplicativeError[F, Throwable].raiseError[List[Resp]](e)
           case Resp.ParseIncomplete(arr) => getTillEqualSize(acc, arr)
           case Resp.ParseComplete(value, rest) => 
-            if (value.size + acc.foldMap(_.size) === calls.size) (value ::acc ).reverse.flatten.pure[F]
+            if (value.size + acc.foldMap(_.size) === calls.size) socket.buffer(Chunk.array(rest)) >> (value ::acc ).reverse.flatten.pure[F]
             else getTillEqualSize(value :: acc, rest)
           
         }
@@ -64,7 +65,7 @@ object RedisConnection{
     key: Option[String]
   ): F[NonEmptyList[Resp]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
-      def withSocket(socket: Socket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => l.toNel.toRight(RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input")).liftTo[F])
+      def withSocket(socket: BufferedSocket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => l.toNel.toRight(RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input")).liftTo[F])
       def raiseNonEmpty(chunk: Chunk[Resp]): F[NonEmptyList[Resp]] = 
         chunk.toNel.fold(RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input").raiseError[F, NonEmptyList[Resp]])(_.pure[F])
       connection match {
@@ -129,7 +130,7 @@ object RedisConnection{
       TLSParameters.Default
     )
 
-  class DirectConnectionBuilder[F[_]] private[RedisConnection](
+  class DirectConnectionBuilder[F[_]: Async] private[RedisConnection](
     private val sg: SocketGroup[F],
     private val host: Host,
     private val port: Port,
@@ -162,7 +163,8 @@ object RedisConnection{
       for {
         socket <- sg.client(SocketAddress(host,port), Nil)
         out <- elevateSocket(socket, tlsContext, tlsParameters)
-      } yield RedisConnection.DirectConnection(out)
+        buffered <- Resource.eval(BufferedSocket.fromSocket[F](out))
+      } yield RedisConnection.DirectConnection(buffered)
   }
 
   def pool[F[_]: Async]: PooledConnectionBuilder[F] = 
@@ -204,9 +206,10 @@ object RedisConnection{
     def withSocketGroup(sg: SocketGroup[F]) = copy(sg = sg)
 
     def build: Resource[F,RedisConnection[F]] = 
-      KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
+      KeyPoolBuilder[F, Unit, (BufferedSocket[F], F[Unit])](
         {_ => sg.client(SocketAddress(host,port), Nil)
-          .flatMap(elevateSocket(_, tlsContext, tlsParameters)).allocated
+          .flatMap(elevateSocket(_, tlsContext, tlsParameters))
+          .evalMap(s => BufferedSocket.fromSocket(s)).allocated
         },
         { case (_, shutdown) => shutdown}
       ).build.map(PooledConnection[F](_))
@@ -269,9 +272,10 @@ object RedisConnection{
     def build: Resource[F,RedisConnection[F]] = {
       for {
         queue <- Resource.eval(Queue.bounded[F, Chunk[(Deferred[F, Either[Throwable,Resp]], Resp)]](maxQueued))
-        keypool <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
+        keypool <- KeyPoolBuilder[F, Unit, (BufferedSocket[F], F[Unit])](
           {_ => sg.client(SocketAddress(host,port), Nil)
             .flatMap(elevateSocket(_, tlsContext, tlsParameters))
+            .flatMap(s => Resource.eval(BufferedSocket.fromSocket(s)))
             .allocated
           },
           { case (_, shutdown) => shutdown}
@@ -382,9 +386,10 @@ object RedisConnection{
 
     def build: Resource[F,RedisConnection[F]] = {
       for {
-        keypool <- KeyPoolBuilder[F, (Host, Port), (Socket[F], F[Unit])](
+        keypool <- KeyPoolBuilder[F, (Host, Port), (BufferedSocket[F], F[Unit])](
           {(t: (Host, Port)) => sg.client(SocketAddress(host,port), Nil)
               .flatMap(elevateSocket(_, tlsContext, tlsParameters))
+              .flatMap(s => Resource.eval(BufferedSocket.fromSocket(s)))
               .allocated
           },
           { case (_, shutdown) => shutdown}
