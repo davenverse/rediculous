@@ -55,7 +55,7 @@ object StreamProducerExample extends IOApp {
         val consumer = rs
           .read(Set(mystream), 10000)
           .evalMap(putStrLn)
-          .onError(err => Stream.exec(IO.println(s"Consumer err: $err")))
+          .onError{ case err => Stream.exec(IO.println(s"Consumer err: $err"))}
           .logAverageRate(rate => IO.println(s"Consumer rate: $rate/s"))
 
         val producer = 
@@ -66,7 +66,7 @@ object StreamProducerExample extends IOApp {
             .flatMap{ chunk => 
               Stream.evalSeq(rs.append(chunk.toList))
             }
-            .onError(err => Stream.exec(IO.println(s"Producer err: $err")))
+            .onError{ case err => Stream.exec(IO.println(s"Producer err: $err"))}
             .logAverageRate(rate => IO.println(s"Producer rate: $rate/s"))
 
         val stream = 

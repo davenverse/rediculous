@@ -198,7 +198,7 @@ object RedisCommands {
   // TODO Scan
   // TODO LEX
 
-    sealed trait Trimming
+  sealed trait Trimming
   object Trimming {
     case object Approximate extends Trimming
     case object Exact extends Trimming
@@ -255,7 +255,7 @@ object RedisCommands {
     case class From(stream: String, offset: String) extends StreamOffset 
   }
 
-  case class StreamsRecord(
+  final case class StreamsRecord(
     recordId: String,
     keyValues: List[(String, String)]
   )
@@ -278,7 +278,7 @@ object RedisCommands {
     }
   }
 
-  case class XReadResponse(
+  final case class XReadResponse(
     stream: String,
     records: List[StreamsRecord]
   )
