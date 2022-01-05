@@ -7,6 +7,7 @@ import com.comcast.ip4s._
 // Send a Single Set of Pipelined Commands to the Redis Server
 object PipelineExample extends IOApp {
 
+  type RedisPipelineIO[A] = RedisPipeline2[IO, A]
   def run(args: List[String]): IO[ExitCode] = {
     val r = for {
       // maxQueued: How many elements before new submissions semantically block. Tradeoff of memory to queue jobs. 
@@ -16,15 +17,15 @@ object PipelineExample extends IOApp {
     } yield connection
 
     r.use {client =>
-      val r = (
-        RedisCommands.ping[RedisPipeline],
-        RedisCommands.del[RedisPipeline]("foo"),
-        RedisCommands.get[RedisPipeline]("foo"),
-        RedisCommands.set[RedisPipeline]("foo", "value"),
-        RedisCommands.get[RedisPipeline]("foo")
-      ).tupled
+      val r = List.fill(10000)((
+        RedisCommands.ping[RedisPipelineIO],
+        RedisCommands.del[RedisPipelineIO]("foo"),
+        RedisCommands.get[RedisPipelineIO]("foo"),
+        RedisCommands.set[RedisPipelineIO]("foo", "value"),
+        RedisCommands.get[RedisPipelineIO]("foo")
+      ).tupled).sequence
 
-      val multi = r.pipeline[IO]
+      val multi = r.pipeline
 
       multi.run(client).flatTap(output => IO(println(output)))
 
