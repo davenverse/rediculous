@@ -11,7 +11,7 @@ trait RedisStream[F[_]] {
   def append(messages: List[RedisStream.XAddMessage]): F[List[String]]
 
   def read(
-    keys: Set[String],
+    streams: Set[String],
     chunkSize: Int,
     initialOffset: String => StreamOffset = {(s: String) => StreamOffset.All(s)},
     block: Duration = Duration.Zero,

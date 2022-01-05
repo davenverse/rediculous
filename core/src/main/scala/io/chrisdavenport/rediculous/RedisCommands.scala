@@ -220,15 +220,15 @@ object RedisCommands {
     val default = XAddOpts(None, None, None, false, None, None)
   }
 
-  def xadd[F[_]: RedisCtx](stream: String, map: List[(String, String)], xaddOpts: XAddOpts = XAddOpts.default): F[String] = {
+  def xadd[F[_]: RedisCtx](stream: String, body: List[(String, String)], xaddOpts: XAddOpts = XAddOpts.default): F[String] = {
     val maxLen = xaddOpts.maxLength.toList.flatMap{ l => List("MAXLEN".some, xaddOpts.trimming.map(_.encode), l.encode.some).flattenOption }
     val minId = xaddOpts.minId.toList.flatMap{ l => List("MINID".some, xaddOpts.trimming.map(_.encode), l.encode.some).flattenOption }
     val limit = xaddOpts.limit.toList.flatMap(l=> if (xaddOpts.trimming.contains(Trimming.Approximate)) List("LIMIT", l.encode) else List.empty)
     val noMkStream = Alternative[List].guard(xaddOpts.noMkStream).as("NOMKSTREAM")
     val id = List(xaddOpts.id.getOrElse("*"))
-    val body = map.foldLeft(List.empty[String]){ case (s, (k,v)) => s ::: List(k.encode, v.encode) }
+    val bodyEnd = body.foldLeft(List.empty[String]){ case (s, (k,v)) => s ::: List(k.encode, v.encode) }
 
-    RedisCtx[F].unkeyed(NEL("XADD", stream :: maxLen ::: minId ::: limit ::: noMkStream ::: id ::: body))
+    RedisCtx[F].unkeyed(NEL("XADD", stream :: maxLen ::: minId ::: limit ::: noMkStream ::: id ::: bodyEnd))
   }
 
   final case class XReadOpts(
