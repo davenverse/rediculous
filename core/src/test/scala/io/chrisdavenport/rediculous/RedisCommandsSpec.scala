@@ -10,7 +10,7 @@ import com.comcast.ip4s.Host
 import com.comcast.ip4s.Port
 
 class RedisCommandsSpec extends CatsEffectSuite {
-  val resource = Docker.client[IO].flatMap(client => 
+  val resource = Docker.default[IO].flatMap(client => 
     WhaleTailContainer.build(client, "redis", "latest".some, Map(6379 -> None), Map.empty, Map.empty)
       .evalTap(
         ReadinessStrategy.checkReadiness(

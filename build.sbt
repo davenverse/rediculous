@@ -36,7 +36,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
       "org.typelevel"               %%% "keypool"                    % "0.4.6",
 
       "org.typelevel"               %%% "munit-cats-effect-3"        % munitCatsEffectV         % Test,
-      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.7" % Test,
+      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.8" % Test,
       "org.scalameta"               %%% "munit-scalacheck"            % "0.7.27" % Test,
     )
   ).jsSettings(
