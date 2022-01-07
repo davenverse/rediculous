@@ -75,14 +75,14 @@ object RedisConnection{
         }
       }.rethrow
       case DirectConnection(socket) => withSocket(socket)
-      case Queued(queue, _) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map(d => (d, ({e: Either[Throwable, Resp] => d.complete(e).void}, resp)))).flatMap{ c => 
+      case Queued(queue, _) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map(d => (d, ({(e: Either[Throwable, Resp]) => d.complete(e).void}, resp)))).flatMap{ c => 
         queue.offer(c.map(_._2)) >> {
           val x: F[Chunk[Either[Throwable, Resp]]] = c.traverse{ case (d, _) => d.get }
           val y: F[Chunk[Resp]] = x.flatMap(_.sequence.liftTo[F])
           y
         }   
       }
-      case Cluster(queue, _, _) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map(d => (d, ({e: Either[Throwable, Resp] => d.complete(e).void}, key, None, 0, resp)))).flatMap{ c => 
+      case Cluster(queue, _, _) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map(d => (d, ({(e: Either[Throwable, Resp]) => d.complete(e).void}, key, None, 0, resp)))).flatMap{ c => 
         queue.offer(c.map(_._2)) >> {
           c.traverse(_._1.get).flatMap(_.sequence.liftTo[F])
         }
