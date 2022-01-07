@@ -34,18 +34,18 @@ object RedisConnection{
 
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
-  private[rediculous] def explicitPipelineRequest[F[_]: MonadThrow](socket: BufferedSocket[F], calls: Chunk[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[List[Resp]] = {
-    def getTillEqualSize(acc: List[List[Resp]], lastArr: Array[Byte]): F[List[Resp]] = 
+  private[rediculous] def explicitPipelineRequest[F[_]: MonadThrow](socket: BufferedSocket[F], calls: Chunk[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[Chunk[Resp]] = {
+    def getTillEqualSize(acc: Chunk[Resp], lastArr: Array[Byte]): F[Chunk[Resp]] = 
     socket.read(maxBytes).flatMap{
       case None => 
-        ApplicativeError[F, Throwable].raiseError[List[Resp]](RedisError.Generic("Rediculous: Terminated Before reaching Equal size"))
+        ApplicativeError[F, Throwable].raiseError[Chunk[Resp]](RedisError.Generic("Rediculous: Terminated Before reaching Equal size"))
       case Some(bytes) => 
         Resp.parseAll(lastArr.toArray ++ bytes.toIterable) match {
-          case e@Resp.ParseError(_, _) => ApplicativeError[F, Throwable].raiseError[List[Resp]](e)
+          case e@Resp.ParseError(_, _) => ApplicativeError[F, Throwable].raiseError[Chunk[Resp]](e)
           case Resp.ParseIncomplete(arr) => getTillEqualSize(acc, arr)
           case Resp.ParseComplete(value, rest) => 
-            if (value.size + acc.foldMap(_.size) === calls.size) socket.buffer(Chunk.array(rest)) >> (value ::acc ).reverse.flatten.pure[F]
-            else getTillEqualSize(value :: acc, rest)
+            if (value.size + acc.size === calls.size) socket.buffer(Chunk.array(rest)) >> (Chunk.seq(value)  ++ acc ).pure[F]
+            else getTillEqualSize(Chunk.seq(value) ++ acc, rest)
           
         }
     }
@@ -56,18 +56,17 @@ object RedisConnection{
             buffer.++=(Resp.encode(resp))
         }
       socket.write(Chunk.array(buffer.result())) >>
-      getTillEqualSize(List.empty, Array.emptyByteArray)
-    } else Applicative[F].pure(List.empty)
+      getTillEqualSize(Chunk.empty, Array.emptyByteArray)
+    } else Applicative[F].pure(Chunk.empty)
   }
 
   def runRequestInternal[F[_]: Concurrent](connection: RedisConnection[F])(
-    inputs: NonEmptyList[NonEmptyList[String]],
+    inputs: Chunk[NonEmptyList[String]],
     key: Option[String]
-  ): F[NonEmptyList[Resp]] = {
+  ): F[Chunk[Resp]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
-      def withSocket(socket: BufferedSocket[F]): F[NonEmptyList[Resp]] = explicitPipelineRequest[F](socket, chunk).flatMap(l => l.toNel.toRight(RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input")).liftTo[F])
-      def raiseNonEmpty(chunk: Chunk[Resp]): F[NonEmptyList[Resp]] = 
-        chunk.toNel.fold(RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input").raiseError[F, NonEmptyList[Resp]])(_.pure[F])
+      def withSocket(socket: BufferedSocket[F]): F[Chunk[Resp]] = explicitPipelineRequest[F](socket, chunk)
+
       connection match {
       case PooledConnection(pool) => Functor[({type M[A] = KeyPool[F, Unit, A]})#M].map(pool)(_._1).take(()).use{
         m => withSocket(m.value).attempt.flatTap{
@@ -80,20 +79,26 @@ object RedisConnection{
         queue.offer(c) >> {
           val x: F[Chunk[Either[Throwable, Resp]]] = c.traverse(_._1.get)
           val y: F[Chunk[Resp]] = x.flatMap(_.sequence.liftTo[F])
-          y.flatMap(raiseNonEmpty)
+          y
         }   
       }
       case Cluster(queue, _, _) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map((_, key, None, 0, resp))).flatMap{ c => 
         queue.offer(c) >> {
-          c.traverse(_._1.get).flatMap(_.sequence.liftTo[F]).flatMap(raiseNonEmpty)
+          c.traverse(_._1.get).flatMap(_.sequence.liftTo[F])
         }
       }   
     }
   }
 
+  def toNel[F[_]: ApplicativeThrow](chunk: Chunk[Resp]): F[NonEmptyList[Resp]] = 
+    chunk.toNel.liftTo[F](RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))
+
+  def head[F[_]: ApplicativeThrow](chunk: Chunk[Resp]): F[Resp] = 
+    chunk.head.liftTo[F](RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))
+
   // Can Be used to implement any low level protocols.
   def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], key: Option[String]): F[Either[Resp, A]] = 
-    runRequestInternal(connection)(NonEmptyList.of(input), key).map(nel => RedisResult[A].decode(nel.head))
+    runRequestInternal(connection)(Chunk.singleton(input), key).flatMap(head[F]).map(resp => RedisResult[A].decode(resp))
 
   def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String], key: Option[String]): Redis[F, A] = Redis(Kleisli{(connection: RedisConnection[F]) => 
     runRequest(connection)(input, key).flatMap{
@@ -291,7 +296,7 @@ object RedisConnection{
                           case Left(_) => m.canBeReused.set(Reusable.DontReuse)
                           case _ => Applicative[F].unit
                         }
-                      case l@Left(_) => l.rightCast[List[Resp]].pure[F]
+                      case l@Left(_) => l.rightCast[Chunk[Resp]].pure[F]
                   }.flatMap{
                     case Right(n) => 
                       n.zipWithIndex.traverse_{
@@ -441,7 +446,7 @@ object RedisConnection{
                             case Left(_) => m.canBeReused.set(Reusable.DontReuse)
                             case _ => Applicative[F].unit
                           }
-                        case l@Left(_) => l.rightCast[List[Resp]].pure[F]
+                        case l@Left(_) => l.rightCast[Chunk[Resp]].pure[F]
                       }.flatMap{
                       case Right(n) => 
                         n.zipWithIndex.traverse_{
