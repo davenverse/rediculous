@@ -36,15 +36,15 @@ object RespRaw {
 
 
   }
-  case class RawPipeline[A](key: Option[String], commands: Chunk[NonEmptyList[String]]){
+  final case class RawPipeline[A](key: Option[String], commands: Chunk[NonEmptyList[String]]){
 
-    def pipeline[F[_]](c: RedisConnection[F])(implicit F: cats.effect.Concurrent[F]): F[Chunk[Resp]] = 
+    final def pipeline[F[_]](c: RedisConnection[F])(implicit F: cats.effect.Concurrent[F]): F[Chunk[Resp]] = 
       RedisConnection.runRequestInternal(c)(commands, key)
     
   }
   object RawPipeline {
 
-    implicit def ctx[F[_]]: RedisCtx[RawPipeline] = {
+    implicit val ctx: RedisCtx[RawPipeline] = {
       new RedisCtx[RawPipeline] {
         def keyed[A: RedisResult](key: String, command: NonEmptyList[String]): RawPipeline[A] = 
           RawPipeline(Some(key), Chunk.singleton(command))
@@ -54,13 +54,11 @@ object RespRaw {
       }
     }
 
-    implicit def app[F[_]]: Applicative[RawPipeline] = {
+    implicit val applicative: Applicative[RawPipeline] = {
       new Applicative[RawPipeline]{
         def ap[A, B](ff: RawPipeline[A => B])(fa: RawPipeline[A]): RawPipeline[B] = 
-          RawPipeline(ff.key.orElse(fa.key), ff.commands ++ fa.commands)
-        
+          RawPipeline(ff.key.orElse(fa.key), ff.commands ++ fa.commands)        
         def pure[A](x: A): RawPipeline[A] = RawPipeline(None, Chunk.empty)
-        
       }
     }
     
