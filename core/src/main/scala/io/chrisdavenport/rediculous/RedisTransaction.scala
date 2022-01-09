@@ -118,16 +118,19 @@ object RedisTransaction {
   class MultiExecPartiallyApplied[F[_]]{
 
     def apply[A](tx: RedisTransaction[A])(implicit F: Async[F]): Redis[F, TxResult[A]] = {
+  
       Redis(Kleisli{(c: RedisConnection[F]) => 
         val ((_, commandsR, key), Queued(f)) = tx.value.value.run((0, List.empty, None)).value
         val commands = commandsR.reverse
-        RedisConnection.runRequestInternal(c)(NonEmptyList(
+        val all = NonEmptyList(
           NonEmptyList.of("MULTI"),
           commands ++ 
           List(NonEmptyList.of("EXEC"))
-        ), key).flatMap{_.last match {
-          case Resp.Array(Some(a)) => f(Chunk.seq(a)).fold[TxResult[A]](e => TxResult.Error(e.toString), TxResult.Success(_)).pure[F]
-          case Resp.Array(None) => (TxResult.Aborted: TxResult[A]).pure[F]
+        )
+        RedisConnection.runRequestInternal(c)(Chunk.seq(all.toList), key)
+          .flatMap{_.last match {
+          case Some(Resp.Array(Some(a))) => f(Chunk.seq(a)).fold[TxResult[A]](e => TxResult.Error(e.toString), TxResult.Success(_)).pure[F]
+          case Some(Resp.Array(None)) => (TxResult.Aborted: TxResult[A]).pure[F]
           case other => ApplicativeError[F, Throwable].raiseError(RedisError.Generic(s"EXEC returned $other"))
         }}
       })

@@ -4,6 +4,8 @@ import cats.effect._
 import fs2.io.net._
 import com.comcast.ip4s._
 
+import RespRaw.RawPipeline
+
 // Send a Single Set of Pipelined Commands to the Redis Server
 object PipelineExample extends IOApp {
 
@@ -16,17 +18,17 @@ object PipelineExample extends IOApp {
     } yield connection
 
     r.use {client =>
-      val r = (
-        RedisCommands.ping[RedisPipeline],
-        RedisCommands.del[RedisPipeline]("foo"),
-        RedisCommands.get[RedisPipeline]("foo"),
-        RedisCommands.set[RedisPipeline]("foo", "value"),
-        RedisCommands.get[RedisPipeline]("foo")
-      ).tupled
+      val r = List.fill(500000)((
+        RedisCommands.ping[RawPipeline],
+        RedisCommands.del[RawPipeline]("foo"),
+        RedisCommands.get[RawPipeline]("foo"),
+        RedisCommands.set[RawPipeline]("foo", "value"),
+        RedisCommands.get[RawPipeline]("foo")
+      ).tupled).sequence
 
-      val multi = r.pipeline[IO]
+      val multi = r.pipeline[IO](client)
 
-      multi.run(client).flatTap(output => IO(println(output)))
+      multi.flatTap(output => IO(println(output.size)))
 
     }.as(ExitCode.Success)
 
