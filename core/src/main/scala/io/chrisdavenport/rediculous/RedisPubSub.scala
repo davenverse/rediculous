@@ -148,54 +148,57 @@ object RedisPubSub {
     }
 
     def readMessages(socket: Socket[F], lastArr: Array[Byte]): F[Unit] = {
-      socket.read(maxBytes).flatMap{
-        case None => 
-          ApplicativeError[F, Throwable].raiseError[Unit](RedisError.Generic("Rediculous: Connection Closed"))
-        case Some(bytes) => 
-          Resp.parseAll(lastArr.toArray ++ bytes.toIterable) match {
-            case e@Resp.ParseError(_, _) => ApplicativeError[F, Throwable].raiseError[Unit](e)
-            case Resp.ParseIncomplete(arr) => readMessages(socket, arr)
-            case Resp.ParseComplete(value, rest) => cbStorage.get.flatMap{cbmap => 
-              value.traverse_(resp => 
-                PubSubReply.resp.decode(resp)
-                  .leftMap(resp => RedisError.Generic(s"Rediculous: Not PubSubReply Response Type got: $resp"))
-                  .liftTo[F]
-                  .flatMap{
-                    case PubSubReply.Msg(p@PubSubMessage.PMessage(pattern, _, _)) => cbmap.get(pSubPrefix + pattern).map(f => f(p)).getOrElse(onUnhandledMessage.get.flatMap(f => f(p)))
-                    case PubSubReply.Msg(p@PubSubMessage.Message(channel, _)) => cbmap.get(subPrefix + channel).map(f => f(p)).getOrElse(onUnhandledMessage.get.flatMap(f => f(p)))
-                    case other => onNonMessage.get.flatMap(f => f(other))
-                  }
-              )
-            } >> readMessages(socket, rest)
+      socket.reads.through(fs2.interop.scodec.StreamDecoder.many(Resp.CodecUtils.codec).toPipeByte)
+        .chunks
+        .evalMap(chunkResp => 
+          cbStorage.get.flatMap{cbmap => 
+            chunkResp.traverse{ resp => 
+              PubSubReply.resp.decode(resp)
+                .leftMap(resp => RedisError.Generic(s"Rediculous: Not PubSubReply Response Type got: $resp"))
+                .liftTo[F]
+                .flatMap{
+                  case PubSubReply.Msg(p@PubSubMessage.PMessage(pattern, _, _)) => cbmap.get(pSubPrefix + pattern).map(f => f(p)).getOrElse(onUnhandledMessage.get.flatMap(f => f(p)))
+                  case PubSubReply.Msg(p@PubSubMessage.Message(channel, _)) => cbmap.get(subPrefix + channel).map(f => f(p)).getOrElse(onUnhandledMessage.get.flatMap(f => f(p)))
+                  case other => onNonMessage.get.flatMap(f => f(other))
+                }
+            }
           }
-      }
+        ).compile.drain
     }
 
     def unhandledMessages(cb: RedisPubSub.PubSubMessage => F[Unit]): F[Unit] = onUnhandledMessage.set(cb)
     def nonMessages(cb: RedisPubSub.PubSubReply => F[Unit]): F[Unit] = onNonMessage.set(cb)
 
+    private def encodeResp(nel: NonEmptyList[String]): F[Chunk[Byte]] = {
+      val resp = Resp.renderRequest(nel)
+      Resp.CodecUtils.codec.encode(resp)
+        .toEither
+        .leftMap(err => new RuntimeException(s"Encoding Error - $err"))
+        .map(bits => Chunk.byteVector(bits.bytes))
+        .liftTo[F]
+    }
+
     def psubscribe(s: String, cb: PubSubMessage.PMessage => F[Unit]): F[Unit] = 
       addPSubscribe(s, cb).ifM(
-        sockets.traverse_(_.write(Chunk.array(Resp.encode(Resp.renderRequest(NonEmptyList.of("psubscribe", s)))))),
+        encodeResp(NonEmptyList.of("psubscribe", s)).flatMap(chunk => sockets.traverse_(_.write(chunk))),
         Applicative[F].unit
       )
 
     def punsubscribe(s: String): F[Unit] = 
-      sockets.traverse(_.write(Chunk.array(Resp.encode(Resp.renderRequest(NonEmptyList.of("punsubscribe", s)))))) >>
+      encodeResp(NonEmptyList.of("punsubscribe", s)).flatMap(chunk => sockets.traverse_(_.write(chunk))) >>
       removePSubscribe(s)
 
     def subscribe(s: String, cb: PubSubMessage.Message => F[Unit]): F[Unit] = 
       addSubscribe(s, cb).ifM(
-        sockets.traverse_(_.write(Chunk.array(Resp.encode(Resp.renderRequest(NonEmptyList.of("subscribe", s)))))),
+        encodeResp(NonEmptyList.of("subscribe", s)).flatMap(chunk => sockets.traverse_(_.write(chunk))),
         Applicative[F].unit
       )
       
     def unsubscribe(s: String) = 
-      sockets.traverse_(_.write(Chunk.array(Resp.encode(Resp.renderRequest(NonEmptyList.of("unsubscribe", s)))))) >> 
+      encodeResp(NonEmptyList.of("unsubscribe", s)).flatMap(chunk => sockets.traverse_(_.write(chunk))) >> 
       removeSubscribe(s)
 
-    def ping: F[Unit] = sockets.traverse_(_.write(Chunk.array(Resp.encode(Resp.renderRequest(NonEmptyList.of("ping"))))))
-
+    def ping: F[Unit] = encodeResp(NonEmptyList.of("ping")).flatMap(chunk => sockets.traverse_(_.write(chunk)))
   
     def runMessages: F[Unit] = sockets match {
       case Nil => 

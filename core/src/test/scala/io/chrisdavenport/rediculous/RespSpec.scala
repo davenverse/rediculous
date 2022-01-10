@@ -1,14 +1,14 @@
 package io.chrisdavenport.rediculous
 
 import cats.syntax.all._
-import io.chrisdavenport.rediculous.Resp.ParseComplete
+// import io.chrisdavenport.rediculous.Resp.ParseComplete
 import org.scalacheck.Prop
 import scodec.bits._
 import RespArbitraries._
 import org.scalacheck.Arbitrary
-import io.chrisdavenport.rediculous.Resp.ParseComplete
-import io.chrisdavenport.rediculous.Resp.ParseIncomplete
-import io.chrisdavenport.rediculous.Resp.ParseError
+// import io.chrisdavenport.rediculous.Resp.ParseComplete
+// import io.chrisdavenport.rediculous.Resp.ParseIncomplete
+// import io.chrisdavenport.rediculous.Resp.ParseError
 import scodec.Attempt.Successful
 import scodec.Attempt
 import scodec.Attempt.Failure

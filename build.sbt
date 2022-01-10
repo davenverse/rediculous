@@ -31,6 +31,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
 
       "co.fs2"                      %%% "fs2-core"                   % fs2V,
       "co.fs2"                      %%% "fs2-io"                     % fs2V,
+      "co.fs2"                      %%% "fs2-scodec"                 % fs2V,
 
       "org.typelevel"               %%% "keypool"                    % "0.4.6",
       

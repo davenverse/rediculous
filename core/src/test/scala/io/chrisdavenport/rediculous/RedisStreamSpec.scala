@@ -41,20 +41,20 @@ class RedisStreamSpec extends CatsEffectSuite {
     redisConnection
   )
   test("send a single message"){ //connection => 
-    val messages = List(
+    val messages = fs2.Chunk.singleton(
       RedisStream.XAddMessage("foo", List("bar" -> "baz", "zoom" -> "zad"))
     )
     redisConnection().flatMap{connection => 
       
       val rStream = RedisStream.fromConnection(connection)
       rStream.append(messages) >>
-      rStream.read(Set("foo"), 512).take(1).compile.lastOrError
+      rStream.read(Set("foo")).take(1).compile.lastOrError
 
     }.map{ xrr => 
       val i = xrr.stream
       assertEquals(xrr.stream, "foo")
       val i2 = xrr.records.flatMap(sr => sr.keyValues)
-      assertEquals(i2, messages.flatMap(_.body))
+      assertEquals(i2, messages.toList.flatMap(_.body))
     }
   }
 

@@ -35,40 +35,15 @@ object RedisConnection{
 
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
-
-  // private[this] def readTillEmpty[F[_]: MonadThrow](socket: Socket[F], maxByte: Int): F[Option[Chunk[Byte]]] = {
-  //   socket.read(maxByte).flatMap{
-  //     case None => 
-  //     case Some(chunk) =>
-  //   }
-  // }
   private[rediculous] def explicitPipelineRequest[F[_]: Async](socket: BufferedSocket[F], calls: Chunk[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[Chunk[Resp]] = {
-    def getTillEqualSize(acc: Chunk[Resp], lastArr: Array[Byte]): F[Chunk[Resp]] = 
-    socket.read(maxBytes).flatMap{
-      case None => 
-        ApplicativeError[F, Throwable].raiseError[Chunk[Resp]](RedisError.Generic("Rediculous: Terminated Before reaching Equal size"))
-      case Some(bytes) => 
-        val currentArray = lastArr.toArray ++ bytes.toIterable
-        Resp.parseAll(currentArray) match {
-          case e@Resp.ParseError(_, _) => 
-            println(ByteVector.view(lastArr).decodeUtf8)
-            ApplicativeError[F, Throwable].raiseError[Chunk[Resp]](new Throwable(s"Failed in Explicit Pipeline Request", e))
-          case Resp.ParseIncomplete(arr) => getTillEqualSize(acc, arr)
-          case Resp.ParseComplete(value, rest) => 
-            if ((value.size + acc.size) === calls.size) socket.buffer(Chunk.array(rest)) >> (Chunk.seq(value)  ++ acc ).pure[F]
-            else getTillEqualSize(Chunk.seq(value) ++ acc, rest)
-          
-        }
-    }
-    if (calls.nonEmpty){
-      val buffer = scala.collection.mutable.ArrayBuilder.make[Byte]
-        calls.toList.foreach{
-          case resp => 
-            buffer.++=(Resp.encode(resp))
-        }
-      socket.write(Chunk.array(buffer.result())) >>
-      getTillEqualSize(Chunk.empty, Array.emptyByteArray)
-    } else Applicative[F].pure(Chunk.empty)
+    val out = calls.flatMap(resp => 
+      Resp.CodecUtils.codec.encode(resp).toEither.traverse(bits => Chunk.byteVector(bits.bytes))
+    ).sequence.leftMap(err => new Throwable(s"Failed To Encode Response $err")).liftTo[F]
+    out.flatMap(socket.write) >> 
+    socket.reads.through(fs2.interop.scodec.StreamDecoder.many(Resp.CodecUtils.codec).toPipeByte)
+      .take(calls.size)
+      .compile
+      .to(Chunk)
   }
 
   def runRequestInternal[F[_]: Async](connection: RedisConnection[F])(
