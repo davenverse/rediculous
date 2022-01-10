@@ -264,12 +264,7 @@ object RedisCommands {
     implicit val result : RedisResult[StreamsRecord] = new RedisResult[StreamsRecord] {
       def decode(resp: Resp): Either[Resp,StreamsRecord] = {
         def two[A](l: List[A]): List[(A, A)] = {
-          List.unfold(l) {
-            case first :: second :: rest =>
-              Some((first, second), rest)
-            case _ =>
-              None
-          }
+          l.combinations(2).map{case a :: b :: Nil => (a, b)}.toList
         }
         resp match {
           case  Resp.Array(Some(Resp.BulkString(Some(recordIdBV)) :: Resp.Array(Some(rawKeyValues)) :: Nil)) => 
