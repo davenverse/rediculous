@@ -22,7 +22,7 @@ object RedisResult extends RedisResultLowPriority{
   implicit val string : RedisResult[String] = new RedisResult[String]{
     def decode(resp: Resp): Either[Resp,String] = resp match {
       case Resp.SimpleString(value) => value.asRight
-      case Resp.BulkString(Some(value)) => value.asRight
+      case Resp.BulkString(Some(value)) => value.decodeUtf8.leftMap(_ => resp)
       case otherwise => otherwise.asLeft
     }
   }

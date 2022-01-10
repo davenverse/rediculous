@@ -38,7 +38,7 @@ object RespRaw {
   }
   final case class RawPipeline[A](key: Option[String], commands: Chunk[NonEmptyList[String]]){
 
-    final def pipeline[F[_]](c: RedisConnection[F])(implicit F: cats.effect.Concurrent[F]): F[Chunk[Resp]] = 
+    final def pipeline[F[_]](c: RedisConnection[F])(implicit F: cats.effect.Async[F]): F[Chunk[Resp]] = 
       RedisConnection.runRequestInternal(c)(commands, key)
     
   }

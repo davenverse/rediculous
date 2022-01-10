@@ -19,6 +19,7 @@ import java.time.Instant
 import _root_.io.chrisdavenport.rediculous.cluster.ClusterCommands.ClusterSlots
 import fs2.io.net.SocketGroupCompanionPlatform
 import util.BufferedSocket
+import scodec.bits.ByteVector
 
 sealed trait RedisConnection[F[_]]
 object RedisConnection{
@@ -34,17 +35,27 @@ object RedisConnection{
 
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
-  private[rediculous] def explicitPipelineRequest[F[_]: MonadThrow](socket: BufferedSocket[F], calls: Chunk[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[Chunk[Resp]] = {
+
+  // private[this] def readTillEmpty[F[_]: MonadThrow](socket: Socket[F], maxByte: Int): F[Option[Chunk[Byte]]] = {
+  //   socket.read(maxByte).flatMap{
+  //     case None => 
+  //     case Some(chunk) =>
+  //   }
+  // }
+  private[rediculous] def explicitPipelineRequest[F[_]: Async](socket: BufferedSocket[F], calls: Chunk[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[Chunk[Resp]] = {
     def getTillEqualSize(acc: Chunk[Resp], lastArr: Array[Byte]): F[Chunk[Resp]] = 
     socket.read(maxBytes).flatMap{
       case None => 
         ApplicativeError[F, Throwable].raiseError[Chunk[Resp]](RedisError.Generic("Rediculous: Terminated Before reaching Equal size"))
       case Some(bytes) => 
-        Resp.parseAll(lastArr.toArray ++ bytes.toIterable) match {
-          case e@Resp.ParseError(_, _) => ApplicativeError[F, Throwable].raiseError[Chunk[Resp]](e)
+        val currentArray = lastArr.toArray ++ bytes.toIterable
+        Resp.parseAll(currentArray) match {
+          case e@Resp.ParseError(_, _) => 
+            println(ByteVector.view(lastArr).decodeUtf8)
+            ApplicativeError[F, Throwable].raiseError[Chunk[Resp]](new Throwable(s"Failed in Explicit Pipeline Request", e))
           case Resp.ParseIncomplete(arr) => getTillEqualSize(acc, arr)
           case Resp.ParseComplete(value, rest) => 
-            if (value.size + acc.size === calls.size) socket.buffer(Chunk.array(rest)) >> (Chunk.seq(value)  ++ acc ).pure[F]
+            if ((value.size + acc.size) === calls.size) socket.buffer(Chunk.array(rest)) >> (Chunk.seq(value)  ++ acc ).pure[F]
             else getTillEqualSize(Chunk.seq(value) ++ acc, rest)
           
         }
@@ -60,7 +71,7 @@ object RedisConnection{
     } else Applicative[F].pure(Chunk.empty)
   }
 
-  def runRequestInternal[F[_]: Concurrent](connection: RedisConnection[F])(
+  def runRequestInternal[F[_]: Async](connection: RedisConnection[F])(
     inputs: Chunk[NonEmptyList[String]],
     key: Option[String]
   ): F[Chunk[Resp]] = {
@@ -97,10 +108,10 @@ object RedisConnection{
     chunk.head.liftTo[F](RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))
 
   // Can Be used to implement any low level protocols.
-  def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], key: Option[String]): F[Either[Resp, A]] = 
+  def runRequest[F[_]: Async, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], key: Option[String]): F[Either[Resp, A]] = 
     runRequestInternal(connection)(Chunk.singleton(input), key).flatMap(head[F]).map(resp => RedisResult[A].decode(resp))
 
-  def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String], key: Option[String]): Redis[F, A] = Redis(Kleisli{(connection: RedisConnection[F]) => 
+  def runRequestTotal[F[_]: Async, A: RedisResult](input: NonEmptyList[String], key: Option[String]): Redis[F, A] = Redis(Kleisli{(connection: RedisConnection[F]) => 
     runRequest(connection)(input, key).flatMap{
       case Right(a) => a.pure[F]
       case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)

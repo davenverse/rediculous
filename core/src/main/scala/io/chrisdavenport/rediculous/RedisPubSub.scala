@@ -10,6 +10,8 @@ import cats.data.NonEmptyList
 import scala.concurrent.duration._
 import _root_.io.chrisdavenport.rediculous.implicits._
 import org.typelevel.keypool.Reusable
+import scodec.bits._
+import java.nio.charset.StandardCharsets
 
 /**
  * A RedisPubSub Represent an connection or group of connections
@@ -56,9 +58,12 @@ object RedisPubSub {
     case class Unsubscribed(subscription: String, subscriptionsCount: Int) extends PubSubReply
     case class Msg(message: PubSubMessage) extends PubSubReply
 
+
     implicit val resp: RedisResult[PubSubReply] = new RedisResult[PubSubReply] {
+      val emptyBV = ByteVector.empty
+      val pongBV = ByteVector.encodeUtf8("pong").fold(throw _, identity)
       def decode(resp: Resp): Either[Resp,PubSubReply] = resp match {
-        case r@Resp.Array(Some(Resp.BulkString(Some("pong")) :: Resp.BulkString(Some("")) :: Nil)) => 
+        case r@Resp.Array(Some(Resp.BulkString(Some(pong)) :: Resp.BulkString(Some(empty)) :: Nil)) if pong == pongBV && empty == emptyBV => 
           Pong.asRight
         case r@Resp.Array(Some(r0 :: r1 :: r2 :: rs)) => 
           r0.decode[String].flatMap{
@@ -83,7 +88,7 @@ object RedisPubSub {
     }
   }
 
-  private def socket[F[_]: Concurrent](connection: RedisConnection[F], sockets: List[Socket[F]], maxBytes: Int, onNonMessage: Ref[F, PubSubReply => F[Unit]], onUnhandledMessage: Ref[F, PubSubMessage => F[Unit]], cbStorage: Ref[F, Map[String, PubSubMessage => F[Unit]]]): RedisPubSub[F] = new RedisPubSub[F] {
+  private def socket[F[_]: Async](connection: RedisConnection[F], sockets: List[Socket[F]], maxBytes: Int, onNonMessage: Ref[F, PubSubReply => F[Unit]], onUnhandledMessage: Ref[F, PubSubMessage => F[Unit]], cbStorage: Ref[F, Map[String, PubSubMessage => F[Unit]]]): RedisPubSub[F] = new RedisPubSub[F] {
     val subPrefix = "cs:"
     val pSubPrefix = "ps:"
 
@@ -213,7 +218,7 @@ object RedisPubSub {
    * Cluster Broadcast is used for keyspace notifications which are only local to the node so require
    * connections to all nodes.
    **/
-  def fromConnection[F[_]: Concurrent](connection: RedisConnection[F], maxBytes: Int = 8096, clusterBroadcast: Boolean = false): Resource[F, RedisPubSub[F]] = connection match {
+  def fromConnection[F[_]: Async](connection: RedisConnection[F], maxBytes: Int = 8096, clusterBroadcast: Boolean = false): Resource[F, RedisPubSub[F]] = connection match {
     case RedisConnection.Queued(_, sockets) => 
       sockets.flatMap{managed => 
         val messagesR = Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())

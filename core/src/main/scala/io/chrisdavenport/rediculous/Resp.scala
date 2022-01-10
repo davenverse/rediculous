@@ -6,6 +6,7 @@ import cats.implicits._
 import scala.util.control.NonFatal
 import java.nio.charset.StandardCharsets
 import java.nio.charset.Charset
+import scodec.bits.ByteVector
 
 sealed trait Resp
 
@@ -14,6 +15,11 @@ object Resp {
   sealed trait RespParserResult[+A]{
     def extract: Option[A] = this match {
       case ParseComplete(out, _) => Some(out)
+      case _ => None
+    }
+
+    def extractWithExtras: Option[(A, SArray[Byte])] = this match {
+      case ParseComplete(out, bytes) => Some((out, bytes))
       case _ => None
     }
   }
@@ -39,7 +45,7 @@ object Resp {
   }
 
   def renderArg(arg: String): Resp = {
-    Resp.BulkString(Some(arg))
+    Resp.BulkString(Some(ByteVector.encodeString(arg)(StandardCharsets.UTF_8).fold(throw _ , identity)))
   }
 
   def encode(resp: Resp): SArray[Byte] = {
@@ -76,7 +82,8 @@ object Resp {
     def loop(arr: SArray[Byte]): RespParserResult[List[Resp]] = {
       if (arr.isEmpty) ParseComplete(listBuffer.toList, arr)
       else parse(arr) match {
-        case ParseIncomplete(out) => ParseComplete(listBuffer.toList, out) // Current Good Out, and partial remaining
+        case ParseIncomplete(out) => 
+          ParseComplete(listBuffer.toList, out) // Current Good Out, and partial remaining
         case ParseComplete(value, rest) =>
           listBuffer.append(value)
           loop(rest)
@@ -95,11 +102,58 @@ object Resp {
         case Colon => Integer.parse(arr)
         case Dollar => BulkString.parse(arr)
         case Star => Array.parse(arr)
-        case _   => ParseError("Resp.parse provided array does not begin with any of the valid bytes +,-,:,$,*", None)
+        case _   => ParseError(s"Resp.parse provided array does not begin with any of the valid bytes +,-,:,$$,* \n${ByteVector.view(arr).take(20).decodeUtf8}", None)
       }
     } else {
       ParseIncomplete(arr)
     }
+  }
+
+  object CodecUtils {
+      private val asciiInt: Codec[scala.Int] = ascii.xmap(_.toInt, _.toString)
+  private val crlf = BitVector('\r', '\n')
+  private val delimInt: Codec[scala.Int] = crlfTerm(asciiInt)
+
+  lazy val codec: Codec[RESP] =
+    discriminated[RESP].by(byte)
+      .typecase('+', crlfTerm(utf8).as[String.Simple])
+      .typecase('-', crlfTerm(utf8).as[String.Error])
+      .typecase(':', delimInt.as[Int])
+      .typecase('$', bulk0)
+      .typecase('*', array0)
+
+  private lazy val bulk0: Codec[String.Bulk] =
+    discriminated[String.Bulk].by(recover(constant('-')))
+      .typecase(true, constant('1', '\r', '\n').xmap[String.Bulk.Nil.type](_ => String.Bulk.Nil, _ => ()))
+      .typecase(false, (variableSizeBytes(delimInt, bytes) <~ constant(crlf)).as[String.Bulk.Full])
+
+  lazy val array: Codec[Array] = /*logToStdOut(*/constant('*') ~> array0/*)*/
+
+  private lazy val array0: Codec[Array] =
+    discriminated[Array].by(recover(constant('-')))
+      .typecase(true, constant('1', '\r', '\n').xmap[Array.Nil.type](_ => Array.Nil, _ => ()))
+      .typecase(false, listOfN(delimInt, lazily(codec)).as[Array.Full])
+
+  private def crlfTerm[A](inner: Codec[A]): Codec[A] =
+    Codec(
+      inner.encode(_).map(_ ++ crlf),
+      { bits =>
+        val bytes = bits.bytes
+
+        var i = 0L
+        var done = false
+        while (i < bytes.size - 1 && !done) {
+          if (bytes(i) == '\r' && bytes(i + 1) == '\n')
+            done = true
+          else
+            i += 1
+        }
+
+        val (front, back) = bytes.splitAt(i)
+        // println(s"bits = $bits; bits.decodeAscii = ${bits.decodeAscii}; front = ${front.decodeAscii}; i = $i")
+
+        inner.decode(front.bits).map(_.copy(remainder = back.drop(2).bits))
+      })
   }
 
     // First Byte is +
@@ -130,7 +184,7 @@ object Resp {
         }
       } catch {
         case NonFatal(e) => 
-          ParseError(s"Error in RespSimpleString Processing: ${e.getMessage}", Some(e))
+          ParseError(s"Error in RespSimpleString Processing: ${e.getMessage} - ${ByteVector.view(arr)}", Some(e))
       }
     }
   }
@@ -157,7 +211,7 @@ object Resp {
         }
       } catch {
         case NonFatal(e) => 
-          ParseError(s"Error in Resp Error Processing: ${e.getMessage}", Some(e))
+          ParseError(s"Error in Resp Error Processing: ${e.getMessage} - ${ByteVector.view(arr)}", Some(e))
       }
     }
   }
@@ -182,20 +236,20 @@ object Resp {
         }
       } catch {
         case NonFatal(e) => 
-          ParseError(s"Error in  RespInteger Processing: ${e.getMessage}", Some(e))
+          ParseError(s"Error in  RespInteger Processing: ${e.getMessage} - ${ByteVector.view(arr)}", Some(e))
       }
     }
   }
   // First Byte is $
   // $3/r/n/foo/r/n
-  case class BulkString(value: Option[String]) extends Resp
+  case class BulkString(value: Option[ByteVector]) extends Resp
   object BulkString {
     private val empty = SArray(Dollar) ++ MinusOne ++ CRLF
     def encode(b: BulkString): SArray[Byte] = {
       b.value match {
         case None => empty
         case Some(s) => {
-          val bytes = s.getBytes(StandardCharsets.UTF_8)
+          val bytes = s.toArray
           val size = bytes.size.toString.getBytes(StandardCharsets.UTF_8)
           val buffer = mutable.ArrayBuilder.make[Byte]
           buffer.+=(Dollar)
@@ -222,12 +276,12 @@ object Resp {
         }
         if (length == -1) ParseComplete(BulkString(None), arr.drop(idx))
         else if (idx + length + 2 <= arr.size)  {
-          val out = new String(arr, idx, length, StandardCharsets.UTF_8)
+          val out = ByteVector.view(arr, idx, length)
           ParseComplete(BulkString(Some(out)), arr.drop(idx + length + 2))
         } else ParseIncomplete(arr)
       } catch {
         case NonFatal(e) => 
-          ParseError(s"Error in BulkString Processing: ${e.getMessage}", Some(e))
+          ParseError(s"Error in BulkString Processing: ${e.getMessage} - ${ByteVector.view(arr)}", Some(e))
       }
     }
 
@@ -254,17 +308,20 @@ object Resp {
     def parse(arr: SArray[Byte]): RespParserResult[Array] = {
       var idx = 1
       var length = -1
+      var sizeComplete = false
       try {
         if (arr(0) != Star) throw ParseError("RespArray String did not begin with *", None)
         while (idx < arr.size && arr(idx) != CR){
           idx += 1
         }
-        if (idx < arr.size && (idx +1 <= arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr, 1, idx - 1, StandardCharsets.UTF_8).toInt 
+        if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
+          val out = new String(arr, 1, idx - 1, StandardCharsets.UTF_8).toInt 
           length = out
           idx += 2
+          sizeComplete = true
         }
-        if (length == -1) ParseComplete(Array(None), arr.drop(idx))
+        if (!sizeComplete) ParseIncomplete(arr)
+        else if (length == -1) ParseComplete(Array(None), arr.clone().drop(idx))
         else {
           @scala.annotation.tailrec
           def repeatParse(arr: SArray[Byte], decrease: Int, accum: List[Resp]) : RespParserResult[Array] = {
@@ -277,12 +334,13 @@ object Resp {
                 case e@ParseError(_,_) => e
               }
           }
-          val next = arr.drop(idx)
+          // println("In Repeat Parse")
+          val next = arr.clone().drop(idx)
           repeatParse(next, length, List.empty)
         }
       } catch {
         case NonFatal(e) => 
-          ParseError(s"Error in RespArray Processing: ${e.getMessage}", Some(e))
+          ParseError(s"Error in RespArray Processing: ${e.getMessage} - ${ByteVector.view(arr)}", Some(e))
       }
     }
   }
