@@ -9,6 +9,9 @@ import org.scalacheck.Arbitrary
 import io.chrisdavenport.rediculous.Resp.ParseComplete
 import io.chrisdavenport.rediculous.Resp.ParseIncomplete
 import io.chrisdavenport.rediculous.Resp.ParseError
+import scodec.Attempt.Successful
+import scodec.Attempt
+import scodec.Attempt.Failure
 
 class RespSpec extends munit.ScalaCheckSuite {
 
@@ -244,29 +247,150 @@ class RespSpec extends munit.ScalaCheckSuite {
   //   }
   // }}
 
-  case class PosInt(i: Int)
-  object PosInt {
-    implicit val arb: Arbitrary[PosInt] = org.scalacheck.Arbitrary(
-      org.scalacheck.Gen.chooseNum(1, 2000).map(PosInt(_))
-    )
+
+  property("Resp round-trip - BulkString"){ Prop.forAll{(init: Resp.BulkString) => 
+    Resp.CodecUtils.codec.encode(init).flatMap(Resp.CodecUtils.codec.decode(_)) match {
+      case Successful(value) => 
+        assertEquals(value.value, init)
+        assertEquals(value.remainder.size, 0L)
+      case Attempt.Failure(err) =>
+        val base = Resp.CodecUtils.codec.encode(init)
+        assert(false, s"Uh-oh, ${err} - $base")
+    }
+  }}
+
+  property("Resp round-trip - SimpleString"){ Prop.forAll{(init: Resp.SimpleString) => 
+    Resp.CodecUtils.codec.encode(init).flatMap(Resp.CodecUtils.codec.decode(_)) match {
+      case Successful(value) => 
+        assertEquals(value.value, init)
+        assertEquals(value.remainder.size, 0L)
+      case Attempt.Failure(err) =>
+        val base = Resp.CodecUtils.codec.encode(init)
+        assert(false, s"Uh-oh, ${err} - $base")
+    }
+  }}
+
+  property("Resp round-trip - Error"){ Prop.forAll{(init: Resp.Error) => 
+    Resp.CodecUtils.codec.encode(init).flatMap(Resp.CodecUtils.codec.decode(_)) match {
+      case Successful(value) => 
+        assertEquals(value.value, init)
+        assertEquals(value.remainder.size, 0L)
+      case Attempt.Failure(err) =>
+        val base = Resp.CodecUtils.codec.encode(init)
+        assert(false, s"Uh-oh, ${err} - $base")
+    }
+  }}
+
+  property("Resp round-trip - Integer"){ Prop.forAll{(init: Resp.Integer) => 
+    Resp.CodecUtils.codec.encode(init).flatMap(Resp.CodecUtils.codec.decode(_)) match {
+      case Successful(value) => 
+        assertEquals(value.value, init)
+        assertEquals(value.remainder.size, 0L)
+      case Attempt.Failure(err) =>
+        val base = Resp.CodecUtils.codec.encode(init)
+        assert(false, s"Uh-oh, ${err} - $base")
+    }
+  }}
+
+
+  property("Resp round-trip - Array"){ Prop.forAll{(init: Resp.Array) => 
+    Resp.CodecUtils.codec.encode(init).flatMap(Resp.CodecUtils.codec.decode(_)) match {
+      case Successful(value) => 
+        assertEquals(value.value, init)
+        assertEquals(value.remainder.size, 0L)
+      case Attempt.Failure(err) =>
+        val base = Resp.CodecUtils.codec.encode(init)
+        assert(false, s"Uh-oh, ${err} - $base")
+    }
+  }}
+
+  property("Resp round-trip"){ Prop.forAll{(init: Resp) => 
+    Resp.CodecUtils.codec.encode(init).flatMap(Resp.CodecUtils.codec.decode(_)) match {
+      case Successful(value) => 
+        assertEquals(value.value, init)
+        assertEquals(value.remainder.size, 0L)
+      case Attempt.Failure(err) =>
+        val base = Resp.CodecUtils.codec.encode(init)
+        assert(false, s"Uh-oh, ${err} - $base")
+    }
+  }}
+
+  // test("Round trip the nil bulk string"){
+  //   val init = Resp.BulkString(None)
+  //   val bv = ByteVector.view(Resp.toStringProtocol(init).getBytes())
+  //   // println(bv.decodeAscii)
+  //   // "*3\r\n-r*$2  \r\n"
+  //   Resp.CodecUtils.codec.decode(bv.bits) match {
+  //     case Successful(value) => 
+  //       assertEquals(value.value, init)
+  //       assertEquals(value.remainder.size, 0L)
+  //     case Attempt.Failure(err) =>
+  //       val base = Resp.CodecUtils.codec.encode(init)
+  //       assert(false, s"Uh-oh, ${err} - $base")
+  //   }
+  // }
+
+  test("Round Trip This Specific Array"){
+    val elem1 = Resp.BulkString(None)
+    // val elem2 = Resp.Error("r*")
+    val elem3 = Resp.BulkString(Some(ByteVector[Byte](0, 0)))
+    val elem2 =  Resp.SimpleString("foo")
+    val init = Resp.Array(Some(List(elem1, elem2)))
+    val bv = ByteVector.view(Resp.toStringProtocol(init).getBytes())
+    // println(bv.decodeAscii)
+    // "*3\r\n-r*$2  \r\n"
+    Resp.CodecUtils.codec.decode(bv.bits) match {
+      case Successful(value) => 
+        assertEquals(value.value, init)
+        assertEquals(value.remainder.size, 0L)
+      case Attempt.Failure(err) =>
+        val base = Resp.CodecUtils.codec.encode(init)
+        assert(false, s"Uh-oh, ${err} - $base")
+    }
   }
 
-  property("Incomplete BulkString anything else"){ Prop.forAll{
-    (init: Resp.BulkString, i: PosInt) => 
-      val cli = Resp.toStringRedisCLI(init)
+  private def flatEncode(s: String): String = s.replace("\r", "\\r").replace("\n", "\\n")
 
-      val encoded = Resp.encode(init)
-      val atleast1 = Math.min(encoded.size - 1, i.i)
-      val out = encoded.dropRight(atleast1)
-      val encodedBV = ByteVector(out.clone())
+  // test("Encode like old"){
+  //   val elem1 = Resp.BulkString(None)
+  //   // val elem2 = Resp.Error("r*")
+  //   // val elem3 = Resp.BulkString(Some(ByteVector[Byte](0, 0)))
+  //   val init = Resp.Array(Some(List(elem1, Resp.SimpleString("foo"))))
+  //   val bv = ByteVector.view(Resp.toStringProtocol(init).getBytes())
+  //   Resp.CodecUtils.codec.encode(init) match {
+  //     case Failure(cause) => 
+
+  //     case Successful(value) => 
+  //       // def 
+  //       assertEquals(value.bytes.decodeAscii.map(flatEncode).fold(throw _, identity(_)), Resp.toStringProtocol(init))
+  //       // assertEquals(value.bytes, bv)
+
+  //   }
+  // }
+
+  // case class PosInt(i: Int)
+  // object PosInt {
+  //   implicit val arb: Arbitrary[PosInt] = org.scalacheck.Arbitrary(
+  //     org.scalacheck.Gen.chooseNum(1, 2000).map(PosInt(_))
+  //   )
+  // }
+
+  // property("Incomplete BulkString anything else"){ Prop.forAll{
+  //   (init: Resp.BulkString, i: PosInt) => 
+  //     val cli = Resp.toStringRedisCLI(init)
+
+  //     val encoded = Resp.encode(init)
+  //     val atleast1 = Math.min(encoded.size - 1, i.i)
+  //     val out = encoded.dropRight(atleast1)
+  //     val encodedBV = ByteVector(out.clone())
       
-      Resp.BulkString.parse(
-        out
-      ) match {
-        case Resp.ParseIncomplete(rest) => 
-          assertEquals(ByteVector(rest).decodeUtf8.map(_.replace("\r", """\r""").replace("\n", """\n""")), encodedBV.decodeUtf8.map(_.replace("\r", """\r""").replace("\n", """\n""")))
-        case _ => fail(s"failed with input $init - $i\nResp:$cli")
-      }
-  }}
+  //     Resp.BulkString.parse(
+  //       out
+  //     ) match {
+  //       case Resp.ParseIncomplete(rest) => 
+  //         assertEquals(ByteVector(rest).decodeUtf8.map(_.replace("\r", """\r""").replace("\n", """\n""")), encodedBV.decodeUtf8.map(_.replace("\r", """\r""").replace("\n", """\n""")))
+  //       case _ => fail(s"failed with input $init - $i\nResp:$cli")
+  //     }
+  // }}
   
 }

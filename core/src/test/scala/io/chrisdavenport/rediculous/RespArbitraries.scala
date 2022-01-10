@@ -24,9 +24,9 @@ object RespArbitraries {
   )
 
   implicit val aribitraryBulkString: Arbitrary[Resp.BulkString] = Arbitrary(
-    Gen.oneOf(
-      arbitraryByteVector.arbitrary.map(bv => Resp.BulkString(Some(bv))),
-      Gen.const(Resp.BulkString(None))
+    Gen.frequency(
+      80 -> arbitraryByteVector.arbitrary.map(bv => Resp.BulkString(Some(bv))),
+      20 -> Gen.const(Resp.BulkString(None))
     )
   )
 

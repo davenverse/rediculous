@@ -8,7 +8,13 @@ import java.nio.charset.StandardCharsets
 import java.nio.charset.Charset
 import scodec.bits.ByteVector
 
-sealed trait Resp
+import scodec.Codec
+import scodec.bits.{BitVector, ByteVector}
+import scodec.codecs._
+import scodec.Attempt.Failure
+import scodec.Attempt.Successful
+
+sealed trait Resp extends Product with Serializable
 
 object Resp {
   import scala.{Array => SArray}
@@ -77,6 +83,7 @@ object Resp {
     
   }
 
+
   def parseAll(arr: SArray[Byte]): RespParserResult[List[Resp]] = { // TODO Investigate Performance Benchmarks with Chain
     val listBuffer = new mutable.ListBuffer[Resp]
     def loop(arr: SArray[Byte]): RespParserResult[List[Resp]] = {
@@ -92,6 +99,27 @@ object Resp {
     }
     loop(arr)
   }
+
+  // def parseAllBV(bv: ByteVector): scodec.Attempt[(List[Resp], ByteVector)] = {
+  //   val listBuffer = new mutable.ListBuffer[Resp]
+  //   def loop(bv: BitVector): scodec.Attempt[List[Resp]] = {
+  //     CodecUtils.codec.decode(bv) match {
+  //       case Failure(scodec.Err.InsufficientBits(_, _, _)) => 
+          
+  //       case Successful(value) => 
+      // }
+      // if (arr.isEmpty) 
+      // else parse(arr) match {
+      //   case ParseIncomplete(out) => 
+      //     ParseComplete(listBuffer.toList, out) // Current Good Out, and partial remaining
+      //   case ParseComplete(value, rest) =>
+      //     listBuffer.append(value)
+      //     loop(rest)
+      //   case e@ParseError(_,_) => e
+      // }
+    // }
+    // loop(bv.bits)
+  // } 
 
   def parse(arr: SArray[Byte]): RespParserResult[Resp] = {
     if (arr.size > 0) {
@@ -110,50 +138,58 @@ object Resp {
   }
 
   object CodecUtils {
-      private val asciiInt: Codec[scala.Int] = ascii.xmap(_.toInt, _.toString)
-  private val crlf = BitVector('\r', '\n')
-  private val delimInt: Codec[scala.Int] = crlfTerm(asciiInt)
+    private val asciiInt: Codec[scala.Int] = ascii.xmap[Int](_.toInt, _.toString)
+    private val asciiLong: Codec[scala.Long] = ascii.xmap(_.toLong, _.toString)
+    private val crlf = BitVector('\r', '\n')
+    private val delimInt: Codec[scala.Int] = crlfTerm(asciiInt)
+    private val delimLong: Codec[Long] = crlfTerm(asciiLong)
 
-  lazy val codec: Codec[RESP] =
-    discriminated[RESP].by(byte)
-      .typecase('+', crlfTerm(utf8).as[String.Simple])
-      .typecase('-', crlfTerm(utf8).as[String.Error])
-      .typecase(':', delimInt.as[Int])
-      .typecase('$', bulk0)
-      .typecase('*', array0)
+    lazy val codec: Codec[Resp] =
+      discriminated[Resp].by(byte)
+        .typecase('+', crlfTerm(utf8).as[SimpleString].withContext("SimpleString"))
+        .typecase('-', crlfTerm(utf8).as[Error].withContext("Error"))
+        .typecase(':', delimLong.as[Integer].withContext("Integer"))
+        .typecase('$', bulk0)
+        .typecase('*', array0)
 
-  private lazy val bulk0: Codec[String.Bulk] =
-    discriminated[String.Bulk].by(recover(constant('-')))
-      .typecase(true, constant('1', '\r', '\n').xmap[String.Bulk.Nil.type](_ => String.Bulk.Nil, _ => ()))
-      .typecase(false, (variableSizeBytes(delimInt, bytes) <~ constant(crlf)).as[String.Bulk.Full])
+    private val constEmpty = ByteVector('1', '\r', '\n')
+    private lazy val bulk0: Codec[BulkString] =
+      discriminated[BulkString].by(recover(constant('-')))
+        .|(true){ case BulkString(None) => ()}{bv => BulkString(None)}(constant('1', '\r', '\n').withContext("BulkString None"))
+        .|(false){ case BulkString(Some(s)) => s}{ case bv => BulkString(Some(bv))}((variableSizeBytes(delimInt, bytes) <~ constant(crlf)).withContext("BulkString Some"))
 
-  lazy val array: Codec[Array] = /*logToStdOut(*/constant('*') ~> array0/*)*/
+    // lazy val array: Codec[Array] = constant('*') ~> array0
 
-  private lazy val array0: Codec[Array] =
-    discriminated[Array].by(recover(constant('-')))
-      .typecase(true, constant('1', '\r', '\n').xmap[Array.Nil.type](_ => Array.Nil, _ => ()))
-      .typecase(false, listOfN(delimInt, lazily(codec)).as[Array.Full])
+    private lazy val array0: Codec[Array] =
+      discriminated[Array].by(recover(constant('-')))
+        .|(true){ case Array(None) => constEmpty}(_ => Array(None))(bytes.withContext("Array Nil"))
+        .|(false){ case Array(Some(s)) => s}{ case l => Array(Some(l))}(listOfN(delimInt, lazily(codec)).withContext("Array Some"))
 
-  private def crlfTerm[A](inner: Codec[A]): Codec[A] =
-    Codec(
-      inner.encode(_).map(_ ++ crlf),
-      { bits =>
-        val bytes = bits.bytes
+    // CRLF are much harder to see visually
+    private def flatEncode(s: String): String = s.replace("\r", "\\r").replace("\n", "\\n")
 
-        var i = 0L
-        var done = false
-        while (i < bytes.size - 1 && !done) {
-          if (bytes(i) == '\r' && bytes(i + 1) == '\n')
-            done = true
-          else
-            i += 1
+    private def crlfTerm[A](inner: Codec[A]): Codec[A] =
+      Codec(
+        inner.encode(_).map(_ ++ crlf),
+        { bits =>
+          val bytes = bits.bytes
+
+          var i = 0L
+          var done = false
+          while (i < bytes.size - 1 && !done) {
+            if (bytes(i) == '\r' && bytes(i + 1) == '\n')
+              done = true
+            else
+              i += 1
+          }
+
+          val (front, back) = bytes.splitAt(i)
+          val decoded = inner.decode(front.bits)
+          // println(s"bits = $bits;\n bits.decodeAscii = ${bits.decodeAscii.map(flatEncode)};\n front = ${front.decodeAscii.map(flatEncode)};\n i = $i;\n decoded=$decoded")
+
+          decoded.map(_.copy(remainder = back.drop(2).bits))
         }
-
-        val (front, back) = bytes.splitAt(i)
-        // println(s"bits = $bits; bits.decodeAscii = ${bits.decodeAscii}; front = ${front.decodeAscii}; i = $i")
-
-        inner.decode(front.bits).map(_.copy(remainder = back.drop(2).bits))
-      })
+      )
   }
 
     // First Byte is +
