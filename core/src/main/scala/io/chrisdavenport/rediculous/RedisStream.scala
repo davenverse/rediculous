@@ -15,7 +15,7 @@ trait RedisStream[F[_]] {
     streams: Set[String],
     initialOffset: String => StreamOffset = {(s: String) => StreamOffset.All(s)},
     block: Duration = Duration.Zero,
-    count: Option[Long] = None
+    count: Option[Long] = Some(512)
   ): Stream[F, RedisCommands.XReadResponse]
 }
 

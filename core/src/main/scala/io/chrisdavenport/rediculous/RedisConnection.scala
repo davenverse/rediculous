@@ -35,12 +35,12 @@ object RedisConnection{
 
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
-  private[rediculous] def explicitPipelineRequest[F[_]: Async](socket: BufferedSocket[F], calls: Chunk[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[Chunk[Resp]] = {
+  private[rediculous] def explicitPipelineRequest[F[_]: Async](socket: BufferedSocket[F], calls: Chunk[Resp], maxBytes: Int = 16 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[Chunk[Resp]] = {
     val out = calls.flatMap(resp => 
       Resp.CodecUtils.codec.encode(resp).toEither.traverse(bits => Chunk.byteVector(bits.bytes))
     ).sequence.leftMap(err => new Throwable(s"Failed To Encode Response $err")).liftTo[F]
     out.flatMap(socket.write) >> 
-    socket.reads.through(fs2.interop.scodec.StreamDecoder.many(Resp.CodecUtils.codec).toPipeByte)
+    Stream.eval(socket.read(maxBytes)).repeat.unNoneTerminate.unchunks.through(fs2.interop.scodec.StreamDecoder.many(Resp.CodecUtils.codec).toPipeByte)
       .take(calls.size)
       .compile
       .to(Chunk)
