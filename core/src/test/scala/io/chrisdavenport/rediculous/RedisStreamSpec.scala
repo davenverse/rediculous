@@ -54,7 +54,7 @@ class RedisStreamSpec extends CatsEffectSuite {
       val i = xrr.stream
       assertEquals(xrr.stream, "foo")
       val i2 = xrr.records.flatMap(sr => sr.keyValues)
-      assertEquals(i2, messages.toList.flatMap(_.body))
+      assertEquals(i2.toSet, messages.toList.flatMap(_.body).toSet)
     }
   }
 

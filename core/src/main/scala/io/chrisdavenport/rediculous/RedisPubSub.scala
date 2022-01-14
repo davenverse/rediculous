@@ -263,7 +263,7 @@ object RedisPubSub {
         Resource.eval(topology).flatMap{slots => 
           val servers = slots.l.flatMap(slot => slot.replicas.map(server => (server.host, server.port))).distinct
           val usedServers = if (clusterBroadcast) servers else servers.head :: Nil
-          val usedSockets: Resource[F, List[org.typelevel.keypool.Managed[F, util.BufferedSocket[F]]]] = usedServers.traverse{ case (host, port) => sockets(host, port) }
+          val usedSockets: Resource[F, List[org.typelevel.keypool.Managed[F, Socket[F]]]] = usedServers.traverse{ case (host, port) => sockets(host, port) }
           usedSockets.flatMap(list => 
             Resource.makeCase(socket(connection, list.map(_.value), maxBytes, onNonMessage, onUnhandledMessage, ref).pure[F]){
               case (_, Resource.ExitCase.Errored(_)) | (_, Resource.ExitCase.Canceled) => list.traverse_(managed => managed.canBeReused.set(Reusable.DontReuse))
