@@ -88,7 +88,7 @@ object RedisPubSub {
     }
   }
 
-  private def socket[F[_]: Async](connection: RedisConnection[F], sockets: List[Socket[F]], maxBytes: Int, onNonMessage: Ref[F, PubSubReply => F[Unit]], onUnhandledMessage: Ref[F, PubSubMessage => F[Unit]], cbStorage: Ref[F, Map[String, PubSubMessage => F[Unit]]]): RedisPubSub[F] = new RedisPubSub[F] {
+  private def socket[F[_]: Concurrent](connection: RedisConnection[F], sockets: List[Socket[F]], maxBytes: Int, onNonMessage: Ref[F, PubSubReply => F[Unit]], onUnhandledMessage: Ref[F, PubSubMessage => F[Unit]], cbStorage: Ref[F, Map[String, PubSubMessage => F[Unit]]]): RedisPubSub[F] = new RedisPubSub[F] {
     val subPrefix = "cs:"
     val pSubPrefix = "ps:"
 
@@ -221,7 +221,7 @@ object RedisPubSub {
    * Cluster Broadcast is used for keyspace notifications which are only local to the node so require
    * connections to all nodes.
    **/
-  def fromConnection[F[_]: Async](connection: RedisConnection[F], maxBytes: Int = 8096, clusterBroadcast: Boolean = false): Resource[F, RedisPubSub[F]] = connection match {
+  def fromConnection[F[_]: Concurrent](connection: RedisConnection[F], maxBytes: Int = 8096, clusterBroadcast: Boolean = false): Resource[F, RedisPubSub[F]] = connection match {
     case RedisConnection.Queued(_, sockets) => 
       sockets.flatMap{managed => 
         val messagesR = Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())

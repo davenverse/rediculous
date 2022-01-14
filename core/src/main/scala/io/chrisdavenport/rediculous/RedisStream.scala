@@ -27,7 +27,7 @@ object RedisStream {
    * Create a RedisStream from a connection.
    * 
    **/
-  def fromConnection[F[_]: Async](connection: RedisConnection[F]): RedisStream[F] = new RedisStream[F] {
+  def fromConnection[F[_]: Concurrent](connection: RedisConnection[F]): RedisStream[F] = new RedisStream[F] {
     def append(messages: Chunk[XAddMessage]): F[Chunk[Resp]] = {
       messages
         .traverse{ case msg => 
