@@ -8,7 +8,7 @@ import org.scalacheck.cats.implicits._
 
 object RespArbitraries {
 
-  implicit val arbitraryByteVector = Arbitrary(
+  implicit val arbitraryByteVector: Arbitrary[ByteVector] = Arbitrary(
     G.containerOf[Array, Byte](Arbitrary.arbByte.arbitrary).map(
       array => ByteVector.view(array)
     )
