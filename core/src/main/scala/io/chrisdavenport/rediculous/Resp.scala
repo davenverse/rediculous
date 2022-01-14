@@ -71,15 +71,15 @@ object Resp {
     private val constEmpty = ByteVector('1', '\r', '\n')
     private lazy val bulk0: Codec[BulkString] =
       discriminated[BulkString].by(recover(constant('-'))) // -1\r\n
-        .|(true){ case BulkString(None) => ()}{bv => BulkString(None)}(constant('1', '\r', '\n').withContext("BulkString None"))
-        .|(false){ case BulkString(Some(s)) => s}{ case bv => BulkString(Some(bv))}((variableSizeBytes(delimInt, bytes) <~ constant(crlf)).withContext("BulkString Some"))
+        .caseP(true){ case BulkString(None) => ()}{bv => BulkString(None)}(constant('1', '\r', '\n').withContext("BulkString None"))
+        .caseP(false){ case BulkString(Some(s)) => s}{ case bv => BulkString(Some(bv))}((variableSizeBytes(delimInt, bytes) <~ constant(crlf)).withContext("BulkString Some"))
 
     // lazy val array: Codec[Array] = constant('*') ~> array0
 
     private lazy val array0: Codec[Array] =
       discriminated[Array].by(recover(constant('-')))
-        .|(true){ case Array(None) => constEmpty}(_ => Array(None))(bytes.withContext("Array Nil"))
-        .|(false){ case Array(Some(s)) => s}{ case l => Array(Some(l))}(listOfN(delimInt, lazily(codec)).withContext("Array Some"))
+        .caseP(true){ case Array(None) => constEmpty}(_ => Array(None))(bytes.withContext("Array Nil"))
+        .caseP(false){ case Array(Some(s)) => s}{ case l => Array(Some(l))}(listOfN(delimInt, lazily(codec)).withContext("Array Some"))
 
     // CRLF are much harder to see visually
     private def flatEncode(s: String): String = s.replace("\r", "\\r").replace("\n", "\\n")
