@@ -4,6 +4,7 @@ import cats._
 import cats.implicits._
 import cats.data._
 import cats.effect._
+import scodec.bits.ByteVector
 
 /**
  * For When you don't trust automatic pipelining. 
@@ -21,15 +22,15 @@ final case class RedisPipeline[A](value: RedisTransaction.RedisTxState[RedisTran
 object RedisPipeline {
 
   implicit val ctx: RedisCtx[RedisPipeline] =  new RedisCtx[RedisPipeline]{
-    def keyed[A: RedisResult](key: String, command: NonEmptyList[String]): RedisPipeline[A] = 
+    def keyedBV[A: RedisResult](key: ByteVector, command: NonEmptyList[ByteVector]): RedisPipeline[A] = 
       RedisPipeline(RedisTransaction.RedisTxState{for {
-        s1 <- State.get[(Int, List[NonEmptyList[String]], Option[String])]
+        s1 <- State.get[(Int, List[NonEmptyList[ByteVector]], Option[ByteVector])]
         (i, base, value) = s1
         _ <- State.set((i + 1, command :: base, value.orElse(Some(key))))
       } yield RedisTransaction.Queued(l => RedisResult[A].decode(l(i)))})
 
-    def unkeyed[A: RedisResult](command: NonEmptyList[String]): RedisPipeline[A] = RedisPipeline(RedisTransaction.RedisTxState{for {
-      out <- State.get[(Int, List[NonEmptyList[String]], Option[String])]
+    def unkeyedBV[A: RedisResult](command: NonEmptyList[ByteVector]): RedisPipeline[A] = RedisPipeline(RedisTransaction.RedisTxState{for {
+      out <- State.get[(Int, List[NonEmptyList[ByteVector]], Option[ByteVector])]
       (i, base, value) = out
       _ <- State.set((i + 1, command :: base, value))
     } yield RedisTransaction.Queued(l => RedisResult[A].decode(l(i)))})

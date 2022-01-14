@@ -2,6 +2,7 @@ package io.chrisdavenport.rediculous.cluster
 
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
+import scodec.bits.ByteVector
 
 /**
   * HashSlots are values 0-16384, They are the result of parsing keys, and then
@@ -22,16 +23,18 @@ import java.nio.charset.StandardCharsets
   */
 object HashSlot {
   
-  def find(key: String)(implicit C: Charset = StandardCharsets.UTF_8): Int = {
+  def find(key: ByteVector)(implicit C: Charset = StandardCharsets.UTF_8): Int = {
     val toHash = hashKey(key)
-    CRC16.string(toHash) % 16384
+    CRC16.bytevector(toHash) % 16384
   }
   
-  def hashKey(key: String): String = {
-    val s = key.indexOf('{')
+
+  
+  def hashKey(key: ByteVector): ByteVector = {
+    val s = key.indexOfSlice(ByteVector('{'))
     if (s >= 0) {
-      val e = key.indexOf('}')
-      if (e >= 0 && e != s + 1) key.substring(s + 1, e)
+      val e = key.indexOfSlice(ByteVector('}'))
+      if (e >= 0 && e != s + 1) key.slice(s + 1, e)
       else key
     } else key
   }

@@ -12,6 +12,7 @@ import _root_.io.chrisdavenport.rediculous.implicits._
 import org.typelevel.keypool.Reusable
 import scodec.bits._
 import java.nio.charset.StandardCharsets
+import RedisCtx.syntax.all._
 
 /**
  * A RedisPubSub Represent an connection or group of connections
@@ -170,7 +171,7 @@ object RedisPubSub {
     def nonMessages(cb: RedisPubSub.PubSubReply => F[Unit]): F[Unit] = onNonMessage.set(cb)
 
     private def encodeResp(nel: NonEmptyList[String]): F[Chunk[Byte]] = {
-      val resp = Resp.renderRequest(nel)
+      val resp = Resp.renderRequest(nel.map(ByteVector.encodeUtf8(_).fold(throw _, identity(_))))
       Resp.CodecUtils.codec.encode(resp)
         .toEither
         .leftMap(err => new RuntimeException(s"Encoding Error - $err"))

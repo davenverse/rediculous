@@ -6,6 +6,7 @@ import cats.data.{NonEmptyList => NEL}
 import RedisProtocol._
 import _root_.io.chrisdavenport.rediculous.implicits._
 import scala.collection.immutable.Nil
+import RedisCtx.syntax.all._
 
 object RedisCommands {
 
