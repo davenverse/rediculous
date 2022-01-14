@@ -21,6 +21,26 @@ sealed trait Resp extends Product with Serializable
 
 object Resp {
 
+  // First Byte is +
+  // +foo/r/n
+  case class SimpleString(value: String) extends Resp
+
+  // First Byte is -
+  case class Error(value: String) extends RedisError with Resp{
+    def message: String = s"Error($value)"
+    val cause: Option[Throwable] = None
+  }
+
+  // First Byte is :5412481/r/n
+  case class Integer(long: Long) extends Resp
+
+  // First Byte is $
+  // $3/r/n/foo/r/n
+  case class BulkString(value: Option[ByteVector]) extends Resp
+
+  // First Byte is *
+  case class Array(a: Option[List[Resp]]) extends Resp
+
   def renderRequest(nel: NonEmptyList[String]): Resp = {
     Resp.Array(Some(
       nel.toList.map(renderArg)
@@ -107,25 +127,4 @@ object Resp {
         }
       )
   }
-
-    // First Byte is +
-    // +foo/r/n
-  case class SimpleString(value: String) extends Resp
-
-  // First Byte is -
-  case class Error(value: String) extends RedisError with Resp{
-    def message: String = s"Error($value)"
-    val cause: Option[Throwable] = None
-  }
-
-  // First Byte is :5412481/r/n
-  case class Integer(long: Long) extends Resp
-
-  // First Byte is $
-  // $3/r/n/foo/r/n
-  case class BulkString(value: Option[ByteVector]) extends Resp
-
-  // First Byte is *
-  case class Array(a: Option[List[Resp]]) extends Resp
-
 }
