@@ -5,20 +5,25 @@ import io.chrisdavenport.rediculous._
 import cats.data.NonEmptyList
 import cats.effect._
 import com.comcast.ip4s._
+import scodec.bits.ByteVector
 
 object ClusterCommands {
 
   final case class ClusterServer(host: Host, port: Port, id: String)
   object ClusterServer {
     implicit val result: RedisResult[ClusterServer] = new RedisResult[ClusterServer]{
-      def decode(resp: Resp): Either[Resp,ClusterServer] = resp match {
-        case Resp.Array(Some(Resp.BulkString(Some(host)) :: Resp.Integer(l) :: Resp.BulkString(Some(id)) :: Nil)) => 
-          Host.fromString(host).flatMap{host => 
-            Port.fromInt(l.toInt) .map{ port => 
-              ClusterServer(host, port, id)
-            }
-          }.toRight(resp)
-        case e => e.asLeft
+      def decode(resp: Resp): Either[Resp,ClusterServer] = {
+        def decodeBVString(bv: ByteVector): Either[Resp, String] = bv.decodeUtf8.leftMap(_ => resp)
+        resp match {
+          case Resp.Array(Some(Resp.BulkString(Some(hostBV)) :: Resp.Integer(l) :: Resp.BulkString(Some(idBV)) :: Nil)) => 
+            for {
+              hostS <- decodeBVString(hostBV)
+              host <- Host.fromString(hostS).toRight(resp)
+              port <- Port.fromInt(l.toInt).toRight(resp)
+              id <- decodeBVString(idBV)
+            } yield ClusterServer(host, port, id)
+          case e => e.asLeft
+        }
       }
     }
   }

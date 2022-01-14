@@ -268,8 +268,9 @@ object RedisCommands {
           case otherwise => acc.reverse
         }
         resp match {
-          case  Resp.Array(Some(Resp.BulkString(Some(recordId)) :: Resp.Array(Some(rawKeyValues)) :: Nil)) => 
+          case  Resp.Array(Some(Resp.BulkString(Some(recordIdBV)) :: Resp.Array(Some(rawKeyValues)) :: Nil)) => 
             for {
+              recordId <- recordIdBV.decodeUtf8.leftMap(_ => resp)
               keyValuesList <- rawKeyValues.traverse(RedisResult[String].decode).map(two(_))
             } yield StreamsRecord(recordId, keyValuesList)
           case otherwise => Left(otherwise)
@@ -286,10 +287,12 @@ object RedisCommands {
     implicit val result: RedisResult[XReadResponse] = new RedisResult[XReadResponse] {
       def decode(resp: Resp): Either[Resp,XReadResponse] = {
         resp match {
-          case Resp.Array(Some(Resp.BulkString(Some(stream)) :: Resp.Array(Some(list)) :: Nil)) => 
-            list.traverse(RedisResult[StreamsRecord].decode).map(l => 
-              XReadResponse(stream, l)
-            )
+          case Resp.Array(Some(Resp.BulkString(Some(streamBV)) :: Resp.Array(Some(list)) :: Nil)) => 
+            streamBV.decodeUtf8.leftMap(_ => resp).flatMap{ stream => 
+              list.traverse(RedisResult[StreamsRecord].decode).map(l => 
+                XReadResponse(stream, l)
+              )
+            }
           case otherwise => Left(otherwise)
         }
       }

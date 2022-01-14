@@ -6,7 +6,7 @@ val fs2V = "3.2.3"
 
 val munitCatsEffectV = "1.0.7"
 
-ThisBuild / crossScalaVersions := Seq("2.12.14","2.13.6", "3.1.0")
+ThisBuild / crossScalaVersions := Seq("2.12.15","2.13.8", "3.1.0")
 ThisBuild / scalaVersion := "2.13.6"
 
 // Projects
@@ -31,13 +31,17 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
 
       "co.fs2"                      %%% "fs2-core"                   % fs2V,
       "co.fs2"                      %%% "fs2-io"                     % fs2V,
+      "co.fs2"                      %%% "fs2-scodec"                 % fs2V,
 
       "org.typelevel"               %%% "keypool"                    % "0.4.6",
+      
 
+      "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.3.1" % Test,
       "org.typelevel"               %%% "munit-cats-effect-3"        % munitCatsEffectV         % Test,
       "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.8" % Test,
       "org.scalameta"               %%% "munit-scalacheck"            % "0.7.27" % Test,
-    )
+    ),
+    libraryDependencies += "org.scodec" %%% "scodec-core" % (if (scalaVersion.value.startsWith("2.")) "1.11.9" else "2.1.0")
   ).jsSettings(
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)}
   ).jvmSettings(

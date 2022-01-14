@@ -1,21 +1,21 @@
 package io.chrisdavenport.rediculous
 
 import cats.implicits._
-import fs2.{Stream, Pipe}
+import fs2.{Stream, Pipe, Chunk}
 import scala.concurrent.duration.Duration
 import RedisCommands.{XAddOpts, XReadOpts, StreamOffset, Trimming, xadd, xread}
 import cats.effect._
 
 
 trait RedisStream[F[_]] {
-  def append(messages: List[RedisStream.XAddMessage]): F[List[String]]
+  
+  def append(messages: Chunk[RedisStream.XAddMessage]): F[Chunk[Resp]]
 
   def read(
     streams: Set[String],
-    chunkSize: Int,
     initialOffset: String => StreamOffset = {(s: String) => StreamOffset.All(s)},
     block: Duration = Duration.Zero,
-    count: Option[Long] = None
+    count: Option[Long] = Some(512)
   ): Stream[F, RedisCommands.XReadResponse]
 }
 
@@ -27,15 +27,14 @@ object RedisStream {
    * Create a RedisStream from a connection.
    * 
    **/
-  def fromConnection[F[_]: Async](connection: RedisConnection[F]): RedisStream[F] = new RedisStream[F] {
-    def append(messages: List[XAddMessage]): F[List[String]] = {
+  def fromConnection[F[_]: Concurrent](connection: RedisConnection[F]): RedisStream[F] = new RedisStream[F] {
+    def append(messages: Chunk[XAddMessage]): F[Chunk[Resp]] = {
       messages
         .traverse{ case msg => 
           val opts = msg.approxMaxlen.map(l => XAddOpts.default.copy(maxLength = l.some, trimming = Trimming.Approximate.some))
-          xadd[RedisPipeline](msg.stream, msg.body, opts getOrElse XAddOpts.default)
+          xadd[RespRaw.RawPipeline](msg.stream, msg.body, opts getOrElse XAddOpts.default)
         }
-        .pipeline[F]
-        .run(connection)
+        .pipeline(connection)
     }
 
     private val nextOffset: String => RedisCommands.StreamsRecord => StreamOffset = 
@@ -44,7 +43,7 @@ object RedisStream {
     private val offsetsByKey: List[RedisCommands.StreamsRecord] => Map[String, Option[StreamOffset]] =
       list => list.groupBy(_.recordId).map { case (k, values) => k -> values.lastOption.map(nextOffset(k)) }
 
-    def read(keys: Set[String], chunkSize: Int, initialOffset: String => StreamOffset, block: Duration, count: Option[Long]): Stream[F, RedisCommands.XReadResponse] = {
+    def read(keys: Set[String],  initialOffset: String => StreamOffset, block: Duration, count: Option[Long]): Stream[F, RedisCommands.XReadResponse] = {
       val initial = keys.map(k => k -> initialOffset(k)).toMap
       val opts = XReadOpts.default.copy(blockMillisecond = block.toMillis.some, count = count)
       Stream.eval(Ref.of[F, Map[String, StreamOffset]](initial)).flatMap { ref =>
