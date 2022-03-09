@@ -54,7 +54,7 @@ object RedisConnection{
       def withSocket(socket: Socket[F]): F[Chunk[Resp]] = explicitPipelineRequest[F](socket, chunk)
 
       connection match {
-      case PooledConnection(pool) => Functor[({type M[A] = KeyPool[F, Unit, A]})#M].map(pool)(_._1).take(()).use{
+      case PooledConnection(pool) => Functor[KeyPool[F, Unit, *]].map(pool)(_._1).take(()).use{
         m => withSocket(m.value).attempt.flatTap{
           case Left(_) => m.canBeReused.set(Reusable.DontReuse)
           case _ => Applicative[F].unit
@@ -273,7 +273,7 @@ object RedisConnection{
             Stream.fromQueueUnterminatedChunk(queue, chunkSizeLimit).chunks.map{chunk =>
               val s = if (chunk.nonEmpty) {
                   Stream.eval(
-                    Functor[({type M[A] = KeyPool[F, Unit, A]})#M].map(keypool)(_._1).take(()).attempt.use{
+                    Functor[KeyPool[F, Unit, *]].map(keypool)(_._1).take(()).attempt.use{
                       case Right(m) =>
                         val out = chunk.map(_._2)
                         explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
@@ -299,7 +299,7 @@ object RedisConnection{
             .compile
             .drain
             .background
-      } yield Queued(queue, keypool.take(()).map(Functor[({type M[A] = Managed[F, A]})#M].map(_)(_._1)))
+      } yield Queued(queue, keypool.take(()).map(Functor[Managed[F, *]].map(_)(_._1)))
     }
   }
 
@@ -384,7 +384,7 @@ object RedisConnection{
         ).build
 
         // Cluster Topology Acquisition and Management
-        sockets <- Resource.eval(keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[({ type M[A] = Redis[F, A] })#M].run(_)))
+        sockets <- Resource.eval(keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_)))
         now <- Resource.eval(Temporal[F].realTime.map(_.toMillis))
         refreshLock <- Resource.eval(Semaphore[F](1L))
         refTopology <- Resource.eval(Ref[F].of((sockets, now)))
@@ -403,7 +403,7 @@ object RedisConnection{
             case ((_, setAt), now) if setAt >= (now - cacheTopologySeconds.toMillis) => Applicative[F].unit
             case ((l, _), _) => 
               val nelActions: NonEmptyList[F[ClusterSlots]] = l.map{ case (host, port) => 
-                keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[({ type M[A] = Redis[F, A] })#M].run(_))
+                keypool.take((host, port)).map(_.value._1).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
               }
               raceNThrowFirst(nelActions)
                 .flatMap(s => Clock[F].realTime.map(_.toMillis).flatMap(now => refTopology.set((s,now))))
@@ -422,7 +422,7 @@ object RedisConnection{
                     }.toSeq
                   ).evalMap{
                     case (server, rest) => 
-                      Functor[({type M[A] = KeyPool[F, (Host, Port), A]})#M].map(keypool)(_._1).take(server).attempt.use{
+                      Functor[KeyPool[F, (Host, Port), *]].map(keypool)(_._1).take(server).attempt.use{
                         case Right(m) =>
                           val out = Chunk.seq(rest.map(_._5))
                           explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
