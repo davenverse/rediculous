@@ -3,6 +3,7 @@ package io.chrisdavenport.rediculous
 import cats.data.NonEmptyList
 import cats.effect.Concurrent
 import scala.annotation.implicitNotFound
+import scodec.bits.ByteVector
 
 /**
   * RedisCtx is the Context in Which RedisOperations operate.
@@ -14,18 +15,38 @@ If you are leveraging a custom context not provided by rediculous,
 please consult your library documentation.
 """)
 trait RedisCtx[F[_]]{
-  def keyed[A: RedisResult](key: String, command: NonEmptyList[String]): F[A]
-  def unkeyed[A: RedisResult](command: NonEmptyList[String]): F[A]
+  def keyedBV[A: RedisResult](key: ByteVector, command: NonEmptyList[ByteVector]): F[A]
+  def unkeyedBV[A: RedisResult](command: NonEmptyList[ByteVector]): F[A]
 }
 
 object RedisCtx {
   
   def apply[F[_]](implicit ev: RedisCtx[F]): ev.type = ev
 
+  object syntax {
+    object all extends StringSyntax
+
+    trait StringSyntax {
+      implicit class RedisContext[F[_]](private val ctx: RedisCtx[F]){
+        private def encodeUnsafe(s: String): ByteVector = ByteVector.encodeUtf8(s).fold(throw _, identity(_))
+        // UTF8 String
+        def keyed[A: RedisResult](key: String, command: NonEmptyList[String]): F[A] = {
+          val k = encodeUnsafe(key)
+          val c = command.map(encodeUnsafe)
+          ctx.keyedBV(k, c)
+        }
+        def unkeyed[A: RedisResult](command: NonEmptyList[String]): F[A] = {
+          val c = command.map(encodeUnsafe(_))
+          ctx.unkeyedBV(c)
+        }
+      }
+    }
+  }
+
   implicit def redis[F[_]: Concurrent]: RedisCtx[Redis[F, *]] = new RedisCtx[Redis[F, *]]{
-    def keyed[A: RedisResult](key: String, command: NonEmptyList[String]): Redis[F,A] = 
+    def keyedBV[A: RedisResult](key: ByteVector, command: NonEmptyList[ByteVector]): Redis[F,A] =
       RedisConnection.runRequestTotal(command, Some(key))
-    def unkeyed[A: RedisResult](command: NonEmptyList[String]): Redis[F, A] = 
+    def unkeyedBV[A: RedisResult](command: NonEmptyList[ByteVector]): Redis[F, A] = 
       RedisConnection.runRequestTotal(command, None)
   }
 }

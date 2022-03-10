@@ -6,6 +6,8 @@ import cats.data.{NonEmptyList => NEL}
 import RedisProtocol._
 import _root_.io.chrisdavenport.rediculous.implicits._
 import scala.collection.immutable.Nil
+import RedisCtx.syntax.all._
+import scodec.bits.ByteVector
 
 object RedisCommands {
 
@@ -139,6 +141,16 @@ object RedisCommands {
     val condition = setOpts.setCondition.toList.map(_.encode)
     val keepTTL = Alternative[List].guard(setOpts.keepTTL).as("KEEPTTL")
     RedisCtx[F].keyed(key, NEL("SET", key.encode :: value.encode :: ex ::: px ::: condition ::: keepTTL))
+  }
+
+
+
+  def setBV[F[_]: RedisCtx](key: ByteVector, value: ByteVector, setOpts: SetOpts = SetOpts.default): F[Option[Status]] = {
+    val ex = setOpts.setSeconds.toList.flatMap(l => List("EX", l.encode)).map(toBV)
+    val px = setOpts.setMilliseconds.toList.flatMap(l => List("PX", l.encode)).map(toBV)
+    val condition = setOpts.setCondition.toList.map(_.encode).map(toBV)
+    val keepTTL = Alternative[List].guard(setOpts.keepTTL).as("KEEPTTL").map(toBV)
+    RedisCtx[F].keyedBV(key, NEL(toBV("SET"), key :: value :: ex ::: px ::: condition ::: keepTTL))
   }
 
   final case class ZAddOpts(
@@ -550,6 +562,9 @@ object RedisCommands {
   def get[F[_]: RedisCtx](key: String): F[Option[String]] = 
     RedisCtx[F].keyed(key, NEL.of("GET", key.encode))
 
+  def getBV[F[_]: RedisCtx](key: ByteVector): F[Option[ByteVector]] = 
+    RedisCtx[F].keyedBV(key, NEL.of(toBV("GET"), key))
+
   def getrange[F[_]: RedisCtx](key: String, start: Long, end: Long): F[String] = 
     RedisCtx[F].keyed(key, NEL.of("GETRANGE", key.encode, start.encode, end.encode))
 
@@ -738,4 +753,5 @@ object RedisCommands {
   def publish[F[_]: RedisCtx](channel: String, message: String): F[Int] = 
     RedisCtx[F].unkeyed[Int](cats.data.NonEmptyList.of("PUBLISH", channel, message))
 
+  private def toBV(s: String): ByteVector = ByteVector.encodeUtf8(s).fold(throw _, identity(_))
 }

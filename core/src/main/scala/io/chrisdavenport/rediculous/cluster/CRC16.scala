@@ -2,6 +2,7 @@ package io.chrisdavenport.rediculous.cluster
 
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
+import scodec.bits.ByteVector
 
 /**
   * XMODEM CRC 16 CRC16 - 16-bit Cyclic Redundancy Check (CRC16)
@@ -21,6 +22,14 @@ object CRC16 {
     val base =  string.getBytes(C)
     var crc: Int = 0
     base.foreach{ b =>
+      crc = (crc << 8) ^ table(((crc >>> 8) ^ (b & 0xff)) & 0xff)
+    }
+    crc & 0xFFFF
+  }
+
+  def bytevector(bv: ByteVector): Int = {
+    var crc: Int = 0
+    bv.foreach{ b =>
       crc = (crc << 8) ^ table(((crc >>> 8) ^ (b & 0xff)) & 0xff)
     }
     crc & 0xFFFF

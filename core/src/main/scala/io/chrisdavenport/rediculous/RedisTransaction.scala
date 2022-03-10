@@ -6,6 +6,8 @@ import cats.data._
 import cats.effect._
 import fs2.Chunk
 import RedisProtocol._
+import RedisCtx.syntax.all._
+import scodec.bits.ByteVector
 
 
 /**
@@ -43,15 +45,15 @@ final case class RedisTransaction[A](value: RedisTransaction.RedisTxState[RedisT
 object RedisTransaction {
 
   implicit val ctx: RedisCtx[RedisTransaction] =  new RedisCtx[RedisTransaction]{
-    def keyed[A: RedisResult](key: String, command: NonEmptyList[String]): RedisTransaction[A] = 
+    def keyedBV[A: RedisResult](key: ByteVector, command: NonEmptyList[ByteVector]): RedisTransaction[A] = 
       RedisTransaction(RedisTxState{for {
-        out <- State.get[(Int, List[NonEmptyList[String]], Option[String])]
+        out <- State.get[(Int, List[NonEmptyList[ByteVector]], Option[ByteVector])]
         (i, base, value) = out
         _ <- State.set((i + 1, command :: base, value.orElse(Some(key))))
       } yield Queued(l => RedisResult[A].decode(l(i)))})
 
-    def unkeyed[A: RedisResult](command: NonEmptyList[String]): RedisTransaction[A] = RedisTransaction(RedisTxState{for {
-      out <- State.get[(Int, List[NonEmptyList[String]], Option[String])]
+    def unkeyedBV[A: RedisResult](command: NonEmptyList[ByteVector]): RedisTransaction[A] = RedisTransaction(RedisTxState{for {
+      out <- State.get[(Int, List[NonEmptyList[ByteVector]], Option[ByteVector])]
       (i, base, value) = out
       _ <- State.set((i + 1, command :: base, value))
     } yield Queued(l => RedisResult[A].decode(l(i)))})
@@ -79,11 +81,11 @@ object RedisTransaction {
     final case class Error(value: String) extends TxResult[Nothing]
   }
 
-  final case class RedisTxState[A](value: State[(Int, List[NonEmptyList[String]], Option[String]), A])
+  final case class RedisTxState[A](value: State[(Int, List[NonEmptyList[ByteVector]], Option[ByteVector]), A])
   object RedisTxState {
 
     implicit val m: Monad[RedisTxState] = new StackSafeMonad[RedisTxState]{
-      def pure[A](a: A): RedisTxState[A] = RedisTxState(Monad[State[(Int, List[NonEmptyList[String]], Option[String]), *]].pure(a))
+      def pure[A](a: A): RedisTxState[A] = RedisTxState(Monad[State[(Int, List[NonEmptyList[ByteVector]], Option[ByteVector]), *]].pure(a))
       def flatMap[A, B](fa: RedisTxState[A])(f: A => RedisTxState[B]): RedisTxState[B] = RedisTxState(
         fa.value.flatMap(f.andThen(_.value))
       )
@@ -123,9 +125,9 @@ object RedisTransaction {
         val ((_, commandsR, key), Queued(f)) = tx.value.value.run((0, List.empty, None)).value
         val commands = commandsR.reverse
         val all = NonEmptyList(
-          NonEmptyList.of("MULTI"),
+          NonEmptyList.of(ByteVector.encodeAscii("MULTI").fold(throw _, identity(_))),
           commands ++ 
-          List(NonEmptyList.of("EXEC"))
+          List(NonEmptyList.of(ByteVector.encodeAscii("EXEC").fold(throw _, identity(_))))
         )
         RedisConnection.runRequestInternal(c)(Chunk.seq(all.toList), key)
           .flatMap{_.last match {

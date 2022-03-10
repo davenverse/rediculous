@@ -41,14 +41,14 @@ object Resp {
   // First Byte is *
   case class Array(a: Option[List[Resp]]) extends Resp
 
-  def renderRequest(nel: NonEmptyList[String]): Resp = {
+  def renderRequest(nel: NonEmptyList[ByteVector]): Resp = {
     Resp.Array(Some(
       nel.toList.map(renderArg)
     ))
   }
 
-  def renderArg(arg: String): Resp = {
-    Resp.BulkString(Some(ByteVector.encodeString(arg)(StandardCharsets.UTF_8).fold(throw _ , identity)))
+  def renderArg(arg: ByteVector): Resp = {
+    Resp.BulkString(Some(arg))
   }
 
   def toStringProtocol(resp: Resp)(implicit C: Charset = StandardCharsets.UTF_8) = {

@@ -3,6 +3,7 @@ package io.chrisdavenport.rediculous
 import fs2.Chunk
 import cats.data.NonEmptyList
 import cats.Applicative
+import scodec.bits.ByteVector
 
 object RespRaw {
 
@@ -10,14 +11,14 @@ object RespRaw {
   
 
   object Commands {
-    final case class SingleCommand[A](key: Option[String], command: NonEmptyList[String]) extends Commands[A]
+    final case class SingleCommand[A](key: Option[ByteVector], command: NonEmptyList[ByteVector]) extends Commands[A]
     final case class CompositeCommands[A](commands: Chunk[SingleCommand[_]]) extends Commands[A]
 
     implicit val rawRespCommandsCtx: RedisCtx[Commands] = new RedisCtx[Commands] {
-      def keyed[A: RedisResult](key: String, command: NonEmptyList[String]): Commands[A] = 
+      def keyedBV[A: RedisResult](key: ByteVector, command: NonEmptyList[ByteVector]): Commands[A] = 
         SingleCommand(Some(key), command)
       
-      def unkeyed[A: RedisResult](command: NonEmptyList[String]): Commands[A] = 
+      def unkeyedBV[A: RedisResult](command: NonEmptyList[ByteVector]): Commands[A] = 
         SingleCommand(None, command)
     }
     def combine[C](c1: Commands[_], c2: Commands[_]): Commands[C] = (c1, c2) match {
@@ -36,7 +37,7 @@ object RespRaw {
 
 
   }
-  final case class RawPipeline[A](key: Option[String], commands: Chunk[NonEmptyList[String]]){
+  final case class RawPipeline[A](key: Option[ByteVector], commands: Chunk[NonEmptyList[ByteVector]]){
 
     final def pipeline[F[_]](c: RedisConnection[F])(implicit F: cats.effect.Concurrent[F]): F[Chunk[Resp]] = 
       RedisConnection.runRequestInternal(c)(commands, key)
@@ -46,10 +47,10 @@ object RespRaw {
 
     implicit val ctx: RedisCtx[RawPipeline] = {
       new RedisCtx[RawPipeline] {
-        def keyed[A: RedisResult](key: String, command: NonEmptyList[String]): RawPipeline[A] = 
+        def keyedBV[A: RedisResult](key: ByteVector, command: NonEmptyList[ByteVector]): RawPipeline[A] = 
           RawPipeline(Some(key), Chunk.singleton(command))
         
-        def unkeyed[A: RedisResult](command: NonEmptyList[String]): RawPipeline[A] = 
+        def unkeyedBV[A: RedisResult](command: NonEmptyList[ByteVector]): RawPipeline[A] = 
           RawPipeline(None, Chunk.singleton(command))
       }
     }

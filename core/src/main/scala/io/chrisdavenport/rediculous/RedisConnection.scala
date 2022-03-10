@@ -31,7 +31,7 @@ object RedisConnection{
 
   private[rediculous] case class DirectConnection[F[_]](socket: Socket[F]) extends RedisConnection[F]
 
-  private[rediculous] case class Cluster[F[_]](queue: Queue[F, Chunk[(Either[Throwable, Resp] => F[Unit], Option[String], Option[(Host, Port)], Int, Resp)]], slots: F[ClusterSlots], usePool: (Host, Port) => Resource[F, Managed[F, Socket[F]]]) extends RedisConnection[F]
+  private[rediculous] case class Cluster[F[_]](queue: Queue[F, Chunk[(Either[Throwable, Resp] => F[Unit], Option[ByteVector], Option[(Host, Port)], Int, Resp)]], slots: F[ClusterSlots], usePool: (Host, Port) => Resource[F, Managed[F, Socket[F]]]) extends RedisConnection[F]
 
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
@@ -47,8 +47,8 @@ object RedisConnection{
   }
 
   def runRequestInternal[F[_]: Concurrent](connection: RedisConnection[F])(
-    inputs: Chunk[NonEmptyList[String]],
-    key: Option[String]
+    inputs: Chunk[NonEmptyList[ByteVector]],
+    key: Option[ByteVector]
   ): F[Chunk[Resp]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
       def withSocket(socket: Socket[F]): F[Chunk[Resp]] = explicitPipelineRequest[F](socket, chunk)
@@ -66,7 +66,7 @@ object RedisConnection{
           val x: F[Chunk[Either[Throwable, Resp]]] = c.traverse{ case (d, _) => d.get }
           val y: F[Chunk[Resp]] = x.flatMap(_.sequence.liftTo[F])
           y
-        }   
+        }
       }
       case Cluster(queue, _, _) => chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map(d => (d, ({(e: Either[Throwable, Resp]) => d.complete(e).void}, key, None, 0, resp)))).flatMap{ c => 
         queue.offer(c.map(_._2)) >> {
@@ -83,10 +83,10 @@ object RedisConnection{
     chunk.head.liftTo[F](RedisError.Generic("Rediculous: Impossible Return List was Empty but we guarantee output matches input"))
 
   // Can Be used to implement any low level protocols.
-  def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], key: Option[String]): F[Either[Resp, A]] = 
+  def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[ByteVector], key: Option[ByteVector]): F[Either[Resp, A]] = 
     runRequestInternal(connection)(Chunk.singleton(input), key).flatMap(head[F]).map(resp => RedisResult[A].decode(resp))
 
-  def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String], key: Option[String]): Redis[F, A] = Redis(Kleisli{(connection: RedisConnection[F]) => 
+  def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[ByteVector], key: Option[ByteVector]): Redis[F, A] = Redis(Kleisli{(connection: RedisConnection[F]) => 
     runRequest(connection)(input, key).flatMap{
       case Right(a) => a.pure[F]
       case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
@@ -409,7 +409,7 @@ object RedisConnection{
                 .flatMap(s => Clock[F].realTime.map(_.toMillis).flatMap(now => refTopology.set((s,now))))
           }
         )
-        queue <- Resource.eval(Queue.bounded[F, Chunk[(Either[Throwable,Resp] => F[Unit], Option[String], Option[(Host, Port)], Int, Resp)]](maxQueued))
+        queue <- Resource.eval(Queue.bounded[F, Chunk[(Either[Throwable,Resp] => F[Unit], Option[ByteVector], Option[(Host, Port)], Int, Resp)]](maxQueued))
         cluster = Cluster(queue, refTopology.get.map(_._1), {case(host, port) => keypool.take((host, port)).map(_.map(_._1))})
         _ <- 
             Stream.fromQueueUnterminatedChunk(queue, chunkSizeLimit).chunks.map{chunk =>
@@ -450,7 +450,7 @@ object RedisConnection{
                                 serverRedirect match {
                                   case s@Some(_) => // This is a Special One Off, Requires a Redirect
                                     // Deferred[F, Either[Throwable, Resp]].flatMap{d => // No One Cares About this Callback
-                                      val asking = ({(_: Either[Throwable, Resp]) => Applicative[F].unit}, key, s, 6, Resp.renderRequest(NonEmptyList.of("ASKING"))) // Never Repeat Asking
+                                      val asking = ({(_: Either[Throwable, Resp]) => Applicative[F].unit}, key, s, 6, Resp.renderRequest(NonEmptyList.of(ByteVector.encodeAscii("ASKING").fold(throw _, identity(_))))) // Never Repeat Asking
                                       val repeat = (toSet, key, s, retries + 1, initialCommand)
                                       val chunk = Chunk(asking, repeat)
                                       cluster.queue.tryOffer(chunk) // Offer To Have it reprocessed. 

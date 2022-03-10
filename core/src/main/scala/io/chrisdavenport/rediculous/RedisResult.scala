@@ -2,6 +2,7 @@ package io.chrisdavenport.rediculous
 
 import cats._
 import cats.implicits._
+import scodec.bits.ByteVector
 
 trait RedisResult[+A]{
   def decode(resp: Resp): Either[Resp, A]
@@ -23,6 +24,13 @@ object RedisResult extends RedisResultLowPriority{
     def decode(resp: Resp): Either[Resp,String] = resp match {
       case Resp.SimpleString(value) => value.asRight
       case Resp.BulkString(Some(value)) => value.decodeUtf8.leftMap(_ => resp)
+      case otherwise => otherwise.asLeft
+    }
+  }
+
+  implicit val bytevector: RedisResult[ByteVector] = new RedisResult[ByteVector] {
+    def decode(resp: Resp): Either[Resp,ByteVector] = resp match {
+      case Resp.BulkString(Some(value)) => value.asRight
       case otherwise => otherwise.asLeft
     }
   }
