@@ -6,26 +6,27 @@ import scodec.bits.ByteVector
 class HashSlotSpec extends munit.FunSuite {
 
   def toBV(bv: String): ByteVector = ByteVector.encodeUtf8(bv).fold(throw _, identity(_))
-    test("HashSlot.hashKey Find the right key section for a keyslot"){
-      val input = "{user.name}.foo"
-      assert(HashSlot.hashKey(toBV(input)) === toBV("user.name"))
-    }
-    test("HashSlot.hashKey Find the right key in middle of key") {
-      val input = "bar{foo}baz"
-      assert(HashSlot.hashKey(toBV(input)) === toBV("foo"))
-    }
-    test("HashSlot.hashKey Find the right key at end of key"){
-      val input = "barbaz{foo}"
-      assert(HashSlot.hashKey(toBV(input)) === toBV("foo"))
-    }
-    test("HashSlot.hashKey output original key if braces are directly next to each other"){
-      val input = "{}.bar"
-      assert(HashSlot.hashKey(toBV(input)) === toBV(input))
-    }
-    test("HashSlot.hashKey output the full value if no keyslot present") {
-      val input = "bazbarfoo"
-      assert(HashSlot.hashKey(toBV(input)) === toBV(input))
-    }
+  
+  test("HashSlot.hashKey Find the right key section for a keyslot"){
+    val input = "{user.name}.foo"
+    assert(HashSlot.hashKey(toBV(input)) === toBV("user.name"))
+  }
+  test("HashSlot.hashKey Find the right key in middle of key") {
+    val input = "bar{foo}baz"
+    assert(HashSlot.hashKey(toBV(input)) === toBV("foo"))
+  }
+  test("HashSlot.hashKey Find the right key at end of key"){
+    val input = "barbaz{foo}"
+    assert(HashSlot.hashKey(toBV(input)) === toBV("foo"))
+  }
+  test("HashSlot.hashKey output original key if braces are directly next to each other"){
+    val input = "{}.bar"
+    assert(HashSlot.hashKey(toBV(input)) === toBV(input))
+  }
+  test("HashSlot.hashKey output the full value if no keyslot present") {
+    val input = "bazbarfoo"
+    assert(HashSlot.hashKey(toBV(input)) === toBV(input))
+  }
 
   /**
   import cats.implicits._
