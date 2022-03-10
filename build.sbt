@@ -19,6 +19,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
   .crossType(CrossType.Pure)
   .in(file("core"))
   .settings(yPartial)
+  .settings(yKindProjector)
   .settings(
     name := "rediculous",
     mimaPreviousArtifacts := Set(), // Bincompat breaking till next release
@@ -86,5 +87,17 @@ lazy val yPartial =
     scalacOptions ++= {
       if (scalaVersion.value.startsWith("2.12")) Seq("-Ypartial-unification")
       else Seq()
+    }
+  )
+
+lazy val yKindProjector =
+  Seq(
+    scalacOptions ++= {
+      if(scalaVersion.value.startsWith("3")) Seq("-Ykind-projector")
+      else Seq()
+    },
+    libraryDependencies ++= {
+      if(scalaVersion.value.startsWith("3")) Seq()
+      else Seq(compilerPlugin("org.typelevel" % "kind-projector" % "0.13.2" cross CrossVersion.full))
     }
   )

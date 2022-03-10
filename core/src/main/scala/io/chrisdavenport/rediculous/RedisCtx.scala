@@ -43,8 +43,8 @@ object RedisCtx {
     }
   }
 
-  implicit def redis[F[_]: Concurrent]: RedisCtx[({ type M[A] = Redis[F, A] })#M] = new RedisCtx[({ type M[A] = Redis[F, A] })#M]{
-    def keyedBV[A: RedisResult](key: ByteVector, command: NonEmptyList[ByteVector]): Redis[F,A] = 
+  implicit def redis[F[_]: Concurrent]: RedisCtx[Redis[F, *]] = new RedisCtx[Redis[F, *]]{
+    def keyedBV[A: RedisResult](key: ByteVector, command: NonEmptyList[ByteVector]): Redis[F,A] =
       RedisConnection.runRequestTotal(command, Some(key))
     def unkeyedBV[A: RedisResult](command: NonEmptyList[ByteVector]): Redis[F, A] = 
       RedisConnection.runRequestTotal(command, None)

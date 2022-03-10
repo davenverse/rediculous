@@ -94,7 +94,7 @@ object RedisPubSub {
     val pSubPrefix = "ps:"
 
     def publish(s: String, message: String): F[Int] = 
-      RedisCtx[({type M[A] = Redis[F, A]})#M].unkeyed[Int](cats.data.NonEmptyList.of("PUBLISH", s, message)).run(connection)
+      RedisCtx[Redis[F, *]].unkeyed[Int](cats.data.NonEmptyList.of("PUBLISH", s, message)).run(connection)
 
     def unsubscribeAll: F[Unit] = cbStorage.get.map(_.keys.toList).flatMap{list => 
       val channelSubscriptions = list.collect{ case x if x.startsWith("c") => x.drop(3)}
