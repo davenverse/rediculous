@@ -1,4 +1,18 @@
-import sbtcrossproject.CrossPlugin.autoImport.{crossProject, CrossType}
+ThisBuild / tlBaseVersion := "0.2" // your current series x.y
+
+ThisBuild / organization := "io.chrisdavenport"
+ThisBuild / organizationName := "Christopher Davenport"
+ThisBuild / licenses := Seq(License.MIT)
+ThisBuild / developers := List(
+  // your GitHub handle and name
+  tlGitHubDev("christopherdavenport", "Christopher Davenport")
+)
+
+ThisBuild / tlCiReleaseBranches := Seq("main")
+
+// true by default, set to false to publish to s01.oss.sonatype.org
+ThisBuild / tlSonatypeUseLegacyHost := true
+
 
 val catsV = "2.7.0"
 val catsEffectV = "3.3.3"
@@ -11,16 +25,12 @@ ThisBuild / scalaVersion := "2.13.6"
 ThisBuild / versionScheme := Some("early-semver")
 
 // Projects
-lazy val `rediculous` = project.in(file("."))
-  .disablePlugins(MimaPlugin)
-  .enablePlugins(NoPublishPlugin)
+lazy val `rediculous` = tlCrossRootProject
   .aggregate(core.jvm, core.js, examples.jvm, examples.js)
 
 lazy val core = crossProject(JVMPlatform, JSPlatform)
   .crossType(CrossType.Pure)
   .in(file("core"))
-  .settings(yPartial)
-  .settings(yKindProjector)
   .settings(
     name := "rediculous",
     mimaPreviousArtifacts := Set(), // Bincompat breaking till next release
@@ -56,7 +66,6 @@ lazy val examples = crossProject(JVMPlatform, JSPlatform)
   .disablePlugins(MimaPlugin)
   .enablePlugins(NoPublishPlugin)
   .dependsOn(core)
-  .settings(yPartial)
   .settings(
     name := "rediculous-examples",
     run / fork := true,
@@ -73,32 +82,5 @@ lazy val examplesJVM = examples.jvm
 lazy val examplesJS = examples.js
 
 lazy val site = project.in(file("site"))
-  .enablePlugins(DavenverseMicrositePlugin)
-  .disablePlugins(MimaPlugin)
-  .enablePlugins(NoPublishPlugin)
-  .settings{
-    import microsites._
-    Seq(
-      micrositeDescription := "Pure FP Redis Client",
-    )
-  }
-
-lazy val yPartial = 
-  Seq(
-    scalacOptions ++= {
-      if (scalaVersion.value.startsWith("2.12")) Seq("-Ypartial-unification")
-      else Seq()
-    }
-  )
-
-lazy val yKindProjector =
-  Seq(
-    scalacOptions ++= {
-      if(scalaVersion.value.startsWith("3")) Seq("-Ykind-projector")
-      else Seq()
-    },
-    libraryDependencies ++= {
-      if(scalaVersion.value.startsWith("3")) Seq()
-      else Seq(compilerPlugin("org.typelevel" % "kind-projector" % "0.13.2" cross CrossVersion.full))
-    }
-  )
+  .enablePlugins(TypelevelSitePlugin)
+  .dependsOn(core.jvm)
