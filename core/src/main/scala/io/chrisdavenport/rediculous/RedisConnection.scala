@@ -140,8 +140,8 @@ object RedisConnection{
 
   class DirectConnectionBuilder[F[_]: Concurrent] private[RedisConnection](
     private val sg: SocketGroup[F],
-    private val host: Host,
-    private val port: Port,
+    val host: Host,
+    val port: Port,
     private val tlsContext: Option[TLSContext[F]],
     private val tlsParameters: TLSParameters 
   ) { self => 
@@ -185,8 +185,8 @@ object RedisConnection{
 
   class PooledConnectionBuilder[F[_]: Async] private[RedisConnection] (
     private val sg: SocketGroup[F],
-    private val host: Host,
-    private val port: Port,
+    val host: Host,
+    val port: Port,
     private val tlsContext: Option[TLSContext[F]],
     private val tlsParameters: TLSParameters 
   ) { self => 
@@ -236,8 +236,8 @@ object RedisConnection{
 
   class QueuedConnectionBuilder[F[_]: Async] private[RedisConnection](
     private val sg: SocketGroup[F],
-    private val host: Host,
-    private val port: Port,
+    val host: Host,
+    val port: Port,
     private val tlsContext: Option[TLSContext[F]],
     private val tlsParameters: TLSParameters,
     private val maxQueued: Int,
@@ -337,8 +337,8 @@ object RedisConnection{
 
   class ClusterConnectionBuilder[F[_]: Async] private[RedisConnection] (
     private val sg: SocketGroup[F],
-    private val host: Host,
-    private val port: Port,
+    val host: Host,
+    val port: Port,
     private val tlsContext: Option[TLSContext[F]],
     private val tlsParameters: TLSParameters,
     private val maxQueued: Int,
