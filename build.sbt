@@ -20,8 +20,7 @@ val fs2V = "3.2.3"
 
 val munitCatsEffectV = "1.0.7"
 
-ThisBuild / crossScalaVersions := Seq("2.12.15","2.13.8", "3.1.0")
-ThisBuild / scalaVersion := "2.13.6"
+ThisBuild / crossScalaVersions := Seq("2.12.15","2.13.8", "3.1.2")
 ThisBuild / versionScheme := Some("early-semver")
 
 // Projects
