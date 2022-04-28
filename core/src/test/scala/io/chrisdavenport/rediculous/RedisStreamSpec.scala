@@ -58,6 +58,28 @@ class RedisStreamSpec extends CatsEffectSuite {
     }
   }
 
+  test("consume messages from offset"){ //connection => 
+    val messages = fs2.Chunk(
+      RedisStream.XAddMessage("fee", List("zoom" -> "zad")),
+      RedisStream.XAddMessage("fee", List("bar" -> "baz"))
+    )
+    redisConnection().flatMap{connection => 
+      
+      val rStream = RedisStream.fromConnection(connection)
+      rStream.append(messages) >>
+      rStream
+        .read(Set("fee"), (_ => RedisCommands.StreamOffset.From("fee", "0-0")), Duration.Zero, 100L.some)
+        .take(4)
+        .timeout(100.milli)
+        .handleErrorWith(_ => fs2.Stream.empty)
+        .compile
+        .toList
+
+    }.map{ resps => 
+      val records = resps.flatMap(_.records)
+      assertEquals(records.length, 2)
+    }
+  }
 }
 
 

@@ -40,8 +40,8 @@ object RedisStream {
     private val nextOffset: String => RedisCommands.StreamsRecord => StreamOffset = 
       key => msg => StreamOffset.From(key, msg.recordId)
 
-    private val offsetsByKey: List[RedisCommands.StreamsRecord] => Map[String, Option[StreamOffset]] =
-      list => list.groupBy(_.recordId).map { case (k, values) => k -> values.lastOption.map(nextOffset(k)) }
+    private val offsetsByKey: List[RedisCommands.XReadResponse] => Map[String, Option[StreamOffset]] =
+      list => list.groupBy(_.stream).map { case (k, values) => k -> values.flatMap(_.records).lastOption.map(nextOffset(k)) }
 
     def read(keys: Set[String],  initialOffset: String => StreamOffset, block: Duration, count: Option[Long]): Stream[F, RedisCommands.XReadResponse] = {
       val initial = keys.map(k => k -> initialOffset(k)).toMap
@@ -50,7 +50,7 @@ object RedisStream {
         (for {
           offsets <- Stream.eval(ref.get)
           list <- Stream.eval(xread(offsets.values.toSet, opts).run(connection)).flattenOption
-          newOffsets = offsetsByKey(list.flatMap(_.records)).collect { case (key, Some(value)) => key -> value }.toList
+          newOffsets = offsetsByKey(list).collect { case (key, Some(value)) => key -> value }.toList
           _ <- Stream.eval(newOffsets.map { case (k, v) => ref.update(_.updated(k, v)) }.sequence)
           result <- Stream.emits(list)
         } yield result).repeat

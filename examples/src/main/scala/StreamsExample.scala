@@ -35,7 +35,7 @@ object StreamRate {
   }
 }
 
-object StreamProducerExample extends IOApp {
+object StreamExample extends IOApp {
   import StreamRate._
 
   def randomMessage: IO[List[(String, String)]] = {
