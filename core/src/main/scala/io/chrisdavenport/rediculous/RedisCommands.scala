@@ -322,6 +322,22 @@ object RedisCommands {
     RedisCtx[F].unkeyed(NEL("XREAD", block ::: count ::: noAck ::: streamPairs))
   }
 
+  def xrange[F[_]: RedisCtx](stream: String, startOpt: Option[String] = None, endOpt: Option[String] = None, countOpt: Option[Int] = None): F[Option[List[StreamsRecord]]] = {
+    val start = List(startOpt.getOrElse("-"))
+    val end = List(endOpt.getOrElse("+"))
+    val count = countOpt.toList.flatMap(l => List("COUNT", l.encode))
+
+    RedisCtx[F].unkeyed(NEL("XRANGE", stream :: start ::: end ::: count))
+  }
+
+  def xrevrange[F[_]: RedisCtx](stream: String, endOpt: Option[String] = None, startOpt: Option[String] = None, countOpt: Option[Int] = None): F[Option[List[StreamsRecord]]] = {
+    val end = List(endOpt.getOrElse("+"))
+    val start = List(startOpt.getOrElse("-"))
+    val count = countOpt.toList.flatMap(l => List("COUNT", l.encode))
+
+    RedisCtx[F].unkeyed(NEL("XREVRANGE", stream :: end ::: start ::: count))
+  }
+
   def xgroupcreate[F[_]: RedisCtx](stream: String, groupName: String, startId: String): F[Status] = 
     RedisCtx[F].unkeyed(NEL.of("XGROUP", "CREATE", stream, groupName, startId))
 
