@@ -28,7 +28,7 @@ class RedisStreamSpec extends CatsEffectSuite {
       (hostS, portI) = t
       host <- Resource.eval(Host.fromString(hostS).liftTo[IO](new Throwable("Invalid Host")))
       port <- Resource.eval(Port.fromInt(portI).liftTo[IO](new Throwable("Invalid Port")))
-      connection <- RedisConnection.pool[IO].withHost(host).withPort(port).build
+      connection <- RedisConnection.queued[IO].withHost(host).withPort(port).build
     } yield connection 
     
   )
@@ -51,7 +51,6 @@ class RedisStreamSpec extends CatsEffectSuite {
       rStream.read(Set("foo")).take(1).compile.lastOrError
 
     }.map{ xrr => 
-      val i = xrr.stream
       assertEquals(xrr.stream, "foo")
       val i2 = xrr.records.flatMap(sr => sr.keyValues)
       assertEquals(i2.toSet, messages.toList.flatMap(_.body).toSet)
@@ -79,6 +78,28 @@ class RedisStreamSpec extends CatsEffectSuite {
     }.map{ resps => 
       val records = resps.flatMap(_.records).flatMap(_.keyValues.map(_._1))
       assertEquals(records, List("1", "2", "3"))
+    }
+  }
+
+  test("consume messages from multiple streams"){ //connection => 
+    val messages = fs2.Chunk(
+      RedisStream.XAddMessage("baf", List("1" -> "1")),
+      RedisStream.XAddMessage("baz", List("2" -> "2")),
+      RedisStream.XAddMessage("bar", List("3" -> "3")),
+    )
+    redisConnection().flatMap{connection => 
+      
+      val rStream = RedisStream.fromConnection(connection)
+      rStream.append(messages) >>
+      rStream
+        .read(Set("baf", "baz", "bar"), stream => RedisCommands.StreamOffset.From(stream, "0"))
+        .take(3)
+        .compile
+        .toList
+
+    }.map{ resps => 
+      val records = resps.flatMap(_.records).flatMap(_.keyValues.map(_._1)).toSet
+      assertEquals(records, Set("1", "2", "3"))
     }
   }
 }

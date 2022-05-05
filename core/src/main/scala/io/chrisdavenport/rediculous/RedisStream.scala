@@ -1,7 +1,7 @@
 package io.chrisdavenport.rediculous
 
 import cats.implicits._
-import fs2.{Stream, Pipe, Chunk}
+import fs2.{Stream, Chunk}
 import scala.concurrent.duration.Duration
 import RedisCommands.{XAddOpts, XReadOpts, StreamOffset, Trimming, xadd, xread}
 import cats.effect._
