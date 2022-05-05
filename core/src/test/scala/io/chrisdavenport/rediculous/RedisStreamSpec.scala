@@ -69,9 +69,7 @@ class RedisStreamSpec extends CatsEffectSuite {
       rStream.append(messages) >>
       rStream
         .read(Set("fee"), (_ => RedisCommands.StreamOffset.From("fee", "0-0")), Duration.Zero, 1L.some)
-        .take(4)
-        .timeout(250.milli)
-        .handleErrorWith(_ => fs2.Stream.empty)
+        .take(3)
         .compile
         .toList
 
