@@ -86,20 +86,23 @@ class RedisStreamSpec extends CatsEffectSuite {
       RedisStream.XAddMessage("baf", List("1" -> "1")),
       RedisStream.XAddMessage("baz", List("2" -> "2")),
       RedisStream.XAddMessage("bar", List("3" -> "3")),
+      RedisStream.XAddMessage("baf", List("4" -> "4")),
+      RedisStream.XAddMessage("baz", List("5" -> "5")),
+      RedisStream.XAddMessage("bar", List("6" -> "6")),
     )
     redisConnection().flatMap{connection => 
       
       val rStream = RedisStream.fromConnection(connection)
       rStream.append(messages) >>
       rStream
-        .read(Set("baf", "baz", "bar"), stream => RedisCommands.StreamOffset.From(stream, "0"))
-        .take(3)
+        .read(Set("baf", "baz", "bar"), stream => RedisCommands.StreamOffset.From(stream, "0"), Duration.Zero, 1L.some)
+        .take(6)
         .compile
         .toList
 
     }.map{ resps => 
       val records = resps.flatMap(_.records).flatMap(_.keyValues.map(_._1)).toSet
-      assertEquals(records, Set("1", "2", "3"))
+      assertEquals(records, Set("1", "2", "3", "4", "5", "6"))
     }
   }
 }
