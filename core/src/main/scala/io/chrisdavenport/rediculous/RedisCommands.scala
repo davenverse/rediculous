@@ -315,8 +315,11 @@ object RedisCommands {
     val block = xreadOpts.blockMillisecond.toList.flatMap(l => List("BLOCK", l.encode))
     val count = xreadOpts.count.toList.flatMap(l => List("COUNT", l.encode))
     val noAck = Alternative[List].guard(xreadOpts.noAck).as("NOACK")
-    val streamKeys = streams.map(_.stream.encode).toList
-    val streamOffsets = streams.map(_.offset.encode).toList
+    val (streamKeys, streamOffsets) = streams
+      .foldLeft((List.empty[String], List.empty[String])){ 
+        case ((keys, offsets), streamOffset) => 
+          (streamOffset.stream :: keys, streamOffset.offset :: offsets)
+      }
     val streamPairs = "STREAMS" :: streamKeys ::: streamOffsets
 
     RedisCtx[F].unkeyed(NEL("XREAD", block ::: count ::: noAck ::: streamPairs))

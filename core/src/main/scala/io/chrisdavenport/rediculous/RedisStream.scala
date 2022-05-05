@@ -1,7 +1,7 @@
 package io.chrisdavenport.rediculous
 
 import cats.implicits._
-import fs2.{Stream, Pipe, Chunk}
+import fs2.{Stream, Chunk}
 import scala.concurrent.duration.Duration
 import RedisCommands.{XAddOpts, XReadOpts, StreamOffset, Trimming, xadd, xread}
 import cats.effect._
@@ -41,7 +41,7 @@ object RedisStream {
       key => msg => StreamOffset.From(key, msg.recordId)
 
     private val offsetsByKey: List[RedisCommands.XReadResponse] => Map[String, Option[StreamOffset]] =
-      list => list.groupBy(_.stream).map { case (k, values) => k -> values.flatMap(_.records).lastOption.map(nextOffset(k)) }
+      list => list.groupBy(_.stream).map { case (k, values) => k -> values.lastOption.flatMap(_.records.lastOption).map(nextOffset(k)) }
 
     def read(keys: Set[String],  initialOffset: String => StreamOffset, block: Duration, count: Option[Long]): Stream[F, RedisCommands.XReadResponse] = {
       val initial = keys.map(k => k -> initialOffset(k)).toMap
