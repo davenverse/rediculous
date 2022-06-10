@@ -68,4 +68,41 @@ class RedisCommandsSpec extends CatsEffectSuite {
       }
     }
   }
+
+  test("xadd/xtrim parity"){
+    redisConnection().flatMap{ connection => 
+      val kv = "bar" -> "baz"
+      val action = RedisCommands.xadd[RedisIO]("foo", List(kv)).replicateA(10) >>
+        RedisCommands.xtrim[RedisIO]("foo", RedisCommands.XTrimStrategy.MaxLen(2), RedisCommands.Trimming.Exact.some) <*
+        RedisCommands.del[RedisIO]("foo")
+
+      action.run(connection).assertEquals(8)
+    }
+  }
+
+  test("xadd/xgroupread parity".only){
+    redisConnection().flatMap{ connection => 
+      val msg1 = "msg1" -> "msg1"
+      val msg2 = "msg2" -> "msg2"
+      val msg3 = "msg3" -> "msg3"
+
+      val extract = (resp: Option[List[RedisCommands.XReadResponse]]) => 
+        resp.flatMap(_.headOption).flatMap(_.records.headOption).flatMap(_.keyValues.headOption)
+
+      val action = 
+        for {
+          _ <- RedisCommands.xgroupcreate[RedisIO]("foo", "group1", "$", true)
+          _ <- RedisCommands.xadd[RedisIO]("foo", List(msg1))
+          _ <- RedisCommands.xadd[RedisIO]("foo", List(msg2))
+          _ <- RedisCommands.xadd[RedisIO]("foo", List(msg3))
+          msg1 <- RedisCommands.xreadgroup[RedisIO](RedisCommands.Consumer("group1", "consumer1"), Set(RedisCommands.StreamOffset.LastConsumed("foo")), RedisCommands.XReadOpts.default.copy(count = Some(1)))
+          msg2 <- RedisCommands.xreadgroup[RedisIO](RedisCommands.Consumer("group1", "consumer2"), Set(RedisCommands.StreamOffset.LastConsumed("foo")), RedisCommands.XReadOpts.default.copy(count = Some(1)))
+          msg3 <- RedisCommands.xreadgroup[RedisIO](RedisCommands.Consumer("group1", "consumer3"), Set(RedisCommands.StreamOffset.LastConsumed("foo")), RedisCommands.XReadOpts.default.copy(count = Some(1)))
+          _ <- RedisCommands.xgroupdestroy[RedisIO]("foo", "group1")
+          _ <- RedisCommands.del[RedisIO]("foo")
+        } yield (extract(msg1), extract(msg2), extract(msg3))
+
+      action.run(connection).assertEquals((Some(msg1), Some(msg2), Some(msg3)))
+    }
+  }
 }

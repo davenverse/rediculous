@@ -264,6 +264,9 @@ object RedisCommands {
     case class Latest(stream: String) extends StreamOffset {
       override def offset: String = "$"
     }
+    case class LastConsumed(stream: String) extends StreamOffset {
+      override def offset: String = ">"
+    }
     case class From(stream: String, offset: String) extends StreamOffset 
   }
 
@@ -277,7 +280,7 @@ object RedisCommands {
       def decode(resp: Resp): Either[Resp,StreamsRecord] = {
         def two[A](l: List[A], acc: List[(A, A)] = List.empty): List[(A, A)] = l match {
           case first :: second :: rest => two(rest, (first, second):: acc)
-          case otherwise => acc.reverse
+          case _ => acc.reverse
         }
         resp match {
           case  Resp.Array(Some(Resp.BulkString(Some(recordIdBV)) :: Resp.Array(Some(rawKeyValues)) :: Nil)) => 
@@ -325,6 +328,23 @@ object RedisCommands {
     RedisCtx[F].unkeyed(NEL("XREAD", block ::: count ::: noAck ::: streamPairs))
   }
 
+  case class Consumer(group: String, name: String)
+
+  def xreadgroup[F[_]: RedisCtx](consumer: Consumer, streams: Set[StreamOffset], xreadOpts: XReadOpts = XReadOpts.default): F[Option[List[XReadResponse]]] = {
+    val group = List("GROUP", consumer.group, consumer.name)
+    val block = xreadOpts.blockMillisecond.toList.flatMap(l => List("BLOCK", l.encode))
+    val count = xreadOpts.count.toList.flatMap(l => List("COUNT", l.encode))
+    val noAck = Alternative[List].guard(xreadOpts.noAck).as("NOACK")
+    val (streamKeys, streamOffsets) = streams
+      .foldLeft((List.empty[String], List.empty[String])){ 
+        case ((keys, offsets), streamOffset) => 
+          (streamOffset.stream :: keys, streamOffset.offset :: offsets)
+      }
+    val streamPairs = "STREAMS" :: streamKeys ::: streamOffsets
+
+    RedisCtx[F].unkeyed(NEL("XREADGROUP", group ::: block ::: count ::: noAck ::: streamPairs))
+  }
+
   def xrange[F[_]: RedisCtx](stream: String, startOpt: Option[String] = None, endOpt: Option[String] = None, countOpt: Option[Int] = None): F[Option[List[StreamsRecord]]] = {
     val start = List(startOpt.getOrElse("-"))
     val end = List(endOpt.getOrElse("+"))
@@ -341,8 +361,10 @@ object RedisCommands {
     RedisCtx[F].unkeyed(NEL("XREVRANGE", stream :: end ::: start ::: count))
   }
 
-  def xgroupcreate[F[_]: RedisCtx](stream: String, groupName: String, startId: String): F[Status] = 
-    RedisCtx[F].unkeyed(NEL.of("XGROUP", "CREATE", stream, groupName, startId))
+  def xgroupcreate[F[_]: RedisCtx](stream: String, groupName: String, startId: String, mkStream: Boolean = false): F[Status] = {
+    val mkStreamFragment = Alternative[List].guard(mkStream).as("MKSTREAM")
+    RedisCtx[F].unkeyed(NEL("XGROUP", "CREATE" :: stream :: groupName :: startId :: mkStreamFragment))
+  }
 
   def xgroupsetid[F[_]: RedisCtx](stream: String, groupName: String, messageId: String): F[Status] = 
     RedisCtx[F].unkeyed(NEL.of("XGROUP", "SETID", stream, groupName, messageId))
@@ -356,12 +378,25 @@ object RedisCommands {
   def xack[F[_]: RedisCtx](stream: String, groupName: String, messageIds: List[String]): F[Long] = 
     RedisCtx[F].unkeyed(NEL("XACK", stream :: groupName :: messageIds))
 
-  // TODO xrange
-  // TODO xrevrange
-
   def xlen[F[_]: RedisCtx](stream: String): F[Long] = 
     RedisCtx[F].unkeyed(NEL.of("XLEN", stream))
   
+  sealed trait XTrimStrategy
+  object XTrimStrategy {
+    case class MaxLen(maxLen: Int) extends XTrimStrategy
+    case class MinId(minId: String) extends XTrimStrategy
+  }
+  
+  def xtrim[F[_]: RedisCtx](stream: String, strategy: XTrimStrategy, trimmingOpt: Option[Trimming] = None, limitOpt: Option[Int] = None): F[Int] = {
+    val strategyFragment = strategy match {
+      case XTrimStrategy.MaxLen(maxLen) => List("MAXLEN".some, trimmingOpt.map(_.encode), maxLen.encode.some).flatten
+      case XTrimStrategy.MinId(minId) => List("MINID".some, trimmingOpt.map(_.encode), minId.encode.some).flatten
+    }
+
+    val limit = limitOpt.toList.flatMap(l => if (trimmingOpt.contains(Trimming.Approximate)) List("LIMIT", l.encode) else List.empty)
+
+    RedisCtx[F].unkeyed(NEL("XTRIM", stream :: strategyFragment ::: limit))
+  }
   // TODO xpendingsummary
   // TOOD xpendingdetail
   // TODO xclaim
@@ -369,8 +404,6 @@ object RedisCommands {
 
   def xdel[F[_]: RedisCtx](stream: String, messageIds: List[String]): F[Long] = 
     RedisCtx[F].unkeyed(NEL("XDEL", stream :: messageIds))
-
-  // TODO xtrim
 
   // Simple String Commands
 
