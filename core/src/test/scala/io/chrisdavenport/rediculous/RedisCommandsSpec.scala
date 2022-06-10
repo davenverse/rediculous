@@ -80,7 +80,7 @@ class RedisCommandsSpec extends CatsEffectSuite {
     }
   }
 
-  test("xadd/xgroupread parity".only){
+  test("xadd/xgroupread parity"){
     redisConnection().flatMap{ connection => 
       val msg1 = "msg1" -> "msg1"
       val msg2 = "msg2" -> "msg2"
