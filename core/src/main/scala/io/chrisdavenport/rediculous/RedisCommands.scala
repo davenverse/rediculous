@@ -361,14 +361,14 @@ object RedisCommands {
     RedisCtx[F].unkeyed(NEL("XREVRANGE", stream :: end ::: start ::: count))
   }
 
-  def xgroupcreate[F[_]: RedisCtx](stream: String, groupName: String, startId: String, mkStream: Boolean): F[Status] = {
+  def xgroupcreate[F[_]: RedisCtx](stream: String, groupName: String, startId: String, mkStream: Boolean = false): F[Status] = {
     val mkStreamFragment = Alternative[List].guard(mkStream).as("MKSTREAM")
     RedisCtx[F].unkeyed(NEL("XGROUP", "CREATE" :: stream :: groupName :: startId :: mkStreamFragment))
   }
 
   @deprecated("use xgroupcreate(stream: String, groupName: String, startId: String, mkStream: Boolean) instead", "0.3.3")
-  def xgroupcreate[F[_]: RedisCtx](stream: String, groupName: String, startId: String): F[Status] = 
-    xgroupcreate(stream, groupName, startId, false)
+  def xgroupcreate[F[_]](stream: String, groupName: String, startId: String, ctx: RedisCtx[F]): F[Status] = 
+    xgroupcreate(stream, groupName, startId, false)(ctx)
 
   def xgroupsetid[F[_]: RedisCtx](stream: String, groupName: String, messageId: String): F[Status] = 
     RedisCtx[F].unkeyed(NEL.of("XGROUP", "SETID", stream, groupName, messageId))
