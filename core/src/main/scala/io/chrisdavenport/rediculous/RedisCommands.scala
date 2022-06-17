@@ -264,6 +264,7 @@ object RedisCommands {
     case class Latest(stream: String) extends StreamOffset {
       override def offset: String = "$"
     }
+    /** Only applicable when using with xreadgroup */
     case class LastConsumed(stream: String) extends StreamOffset {
       override def offset: String = ">"
     }
