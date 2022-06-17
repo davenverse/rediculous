@@ -145,7 +145,10 @@ class RedisCommandsSpec extends CatsEffectSuite {
       val action = 
         for {
           _ <- xgroupcreate[RedisIO]("foo", "group1", "$", true)
-          (id1, id2, id3, id4) <- (addMsg, addMsg, addMsg, addMsg).tupled
+          id1 <- addMsg
+          id2 <- addMsg
+          id3 <- addMsg
+          id4 <- addMsg
           _ <- xreadgroup[RedisIO](Consumer("group1", "consumer1"), Set(StreamOffset.LastConsumed("foo")), XReadOpts.default.copy(count = Some(1)))
           _ <- xreadgroup[RedisIO](Consumer("group1", "consumer2"), Set(StreamOffset.LastConsumed("foo")))
           actual <- xclaimsummary[RedisIO]("foo", Consumer("group1", "consumer1"), args, List(id2, id3, id4))
