@@ -435,6 +435,8 @@ object RedisCommands {
     RedisCtx[F].unkeyed(NEL.of("XPENDING", stream, groupName))
 
   // TOOD xpendingdetail
+  // TODO xautoclaim
+  // TODO xinfo
 
   final case class XClaimArgs(
     minIdleTime: Long,
