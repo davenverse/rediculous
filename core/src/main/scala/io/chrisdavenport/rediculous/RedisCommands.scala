@@ -409,7 +409,6 @@ object RedisCommands {
     greatestId: String,
     consumerPendings: List[(String, Int)]
   )
-
   object XPendingSummary {
     implicit val result: RedisResult[XPendingSummary] = new RedisResult[XPendingSummary] {
       def decode(resp: Resp): Either[Resp,XPendingSummary] = 
@@ -436,8 +435,32 @@ object RedisCommands {
     RedisCtx[F].unkeyed(NEL.of("XPENDING", stream, groupName))
 
   // TOOD xpendingdetail
-  // TODO xclaim
-  // TODO xinfo
+
+  final case class XClaimArgs(
+    minIdleTime: Long,
+    idle: Option[Long] = None,
+    time: Option[Long] = None,
+    retrycount: Option[Long] = None,
+    force: Boolean = false,
+  )
+
+  private def xclaimRaw[F[_]: RedisCtx, A: RedisResult](stream: String, consumer: Consumer, args: XClaimArgs, justId: Boolean, messageIds: List[String]): F[A] = {
+    val consumerFragment = List(consumer.group, consumer.name)
+    val minIdleTime = List(args.minIdleTime.encode)
+    val idle = args.idle.toList.flatMap(l => List("IDLE", l.encode))
+    val time = args.time.toList.flatMap(l => List("TIME", l.encode))
+    val retrycount = args.retrycount.toList.flatMap(l => List("RETRYCOUNT", l.encode))
+    val force = Alternative[List].guard(args.force).as("FORCE")
+    val justIdFragment = Alternative[List].guard(justId).as("JUSTID")
+    val argFragment = idle ::: time ::: retrycount ::: force ::: justIdFragment
+    RedisCtx[F].unkeyed(NEL("XCLAIM", stream :: consumerFragment ::: minIdleTime ::: messageIds ::: argFragment))
+  }
+
+  def xclaimsummary[F[_]: RedisCtx](stream: String, consumer: Consumer, args: XClaimArgs, messageIds: List[String]): F[List[String]] = 
+    xclaimRaw(stream, consumer, args, true, messageIds)
+
+  def xclaimdetail[F[_]: RedisCtx](stream: String, consumer: Consumer, args: XClaimArgs, messageIds: List[String]): F[List[StreamsRecord]] = 
+    xclaimRaw(stream, consumer, args, false, messageIds)
 
   def xdel[F[_]: RedisCtx](stream: String, messageIds: List[String]): F[Long] = 
     RedisCtx[F].unkeyed(NEL("XDEL", stream :: messageIds))
