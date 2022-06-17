@@ -401,7 +401,39 @@ object RedisCommands {
 
     RedisCtx[F].unkeyed(NEL("XTRIM", stream :: strategyFragment ::: limit))
   }
-  // TODO xpendingsummary
+
+  final case class XPendingSummary(
+    totalPending: Long,
+    smallestId: String,
+    greatestId: String,
+    consumerPendings: List[(String, Int)]
+  )
+
+  object XPendingSummary {
+    implicit val result: RedisResult[XPendingSummary] = new RedisResult[XPendingSummary] {
+      def decode(resp: Resp): Either[Resp,XPendingSummary] = 
+        resp match {
+          case Resp.Array(Some(Resp.Integer(totalPending) :: Resp.BulkString(Some(smallestIdBV)) :: Resp.BulkString(Some(greatestIdBV)) :: Resp.Array(Some(list)) :: Nil)) => 
+            for {
+              smallestId <- smallestIdBV.decodeUtf8.leftMap(_ => resp)
+              greatestId <- greatestIdBV.decodeUtf8.leftMap(_ => resp)
+              consumerPendings <- list.traverse{ 
+                                    case Resp.Array(Some(Resp.BulkString(Some(consumerNameBV)) :: Resp.BulkString(Some(pendingCountBV)) :: Nil)) =>  
+                                      (consumerNameBV.decodeUtf8, pendingCountBV.decodeUtf8.map(_.toInt))
+                                        .tupled
+                                        .leftMap(_ => resp)
+                                    case _ => Left(resp)
+                                  }
+            } yield XPendingSummary(totalPending, smallestId, greatestId, consumerPendings)
+            
+          case otherwise => Left(otherwise)
+        }
+    }
+  }
+
+  def xpendingsummary[F[_]: RedisCtx](stream: String, groupName: String): F[XPendingSummary] = 
+    RedisCtx[F].unkeyed(NEL.of("XPENDING", stream, groupName))
+
   // TOOD xpendingdetail
   // TODO xclaim
   // TODO xinfo
