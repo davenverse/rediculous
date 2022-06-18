@@ -489,7 +489,7 @@ object RedisCommands {
   }
   final case class XAutoClaimDetail(
     startId: String,
-    claimedMsgIds: List[StreamsRecord],
+    claimedMsgs: List[StreamsRecord],
     deletedIds: List[String]
   )
   object XAutoClaimDetail {
