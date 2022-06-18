@@ -158,4 +158,28 @@ class RedisCommandsSpec extends CatsEffectSuite {
       action.run(connection)
     }
   }
+
+  test("xautoclaimsummary"){
+    import RedisCommands._
+
+    redisConnection().flatMap{ connection => 
+      val addMsg = xadd[RedisIO]("foo", List("msg" -> "msg"))
+      val args = XAutoClaimArgs(Consumer("group1", "consumer1"), 1, "0-0", Some(100))
+      val action = 
+        for {
+          _ <- xgroupcreate[RedisIO]("foo", "group1", "$", true)
+          id1 <- addMsg
+          id2 <- addMsg
+          id3 <- addMsg
+          id4 <- addMsg
+          _ <- xreadgroup[RedisIO](Consumer("group1", "consumer1"), Set(StreamOffset.LastConsumed("foo")), XReadOpts.default.copy(count = Some(1)))
+          _ <- xreadgroup[RedisIO](Consumer("group1", "consumer2"), Set(StreamOffset.LastConsumed("foo")))
+          _ <- xdel[RedisIO]("foo", List(id4))
+          actual <- xautoclaimsummary[RedisIO]("foo", args)
+          _ <- xgroupdestroy[RedisIO]("foo", "group1")
+          _ <- del[RedisIO]("foo")
+        } yield assertEquals(actual, XAutoClaimSummary("0-0", List(id1, id2, id3), List(id4)))
+      action.run(connection)
+    }
+  }
 }

@@ -435,7 +435,6 @@ object RedisCommands {
     RedisCtx[F].unkeyed(NEL.of("XPENDING", stream, groupName))
 
   // TOOD xpendingdetail
-  // TODO xautoclaim
   // TODO xinfo
 
   final case class XClaimArgs(
@@ -446,7 +445,7 @@ object RedisCommands {
     force: Boolean = false,
   )
 
-  private def xclaimRaw[F[_]: RedisCtx, A: RedisResult](stream: String, consumer: Consumer, args: XClaimArgs, justId: Boolean, messageIds: List[String]): F[A] = {
+  private def xclaimraw[F[_]: RedisCtx, A: RedisResult](stream: String, consumer: Consumer, args: XClaimArgs, justId: Boolean, messageIds: List[String]): F[A] = {
     val consumerFragment = List(consumer.group, consumer.name)
     val minIdleTime = List(args.minIdleTime.encode)
     val idle = args.idle.toList.flatMap(l => List("IDLE", l.encode))
@@ -459,10 +458,68 @@ object RedisCommands {
   }
 
   def xclaimsummary[F[_]: RedisCtx](stream: String, consumer: Consumer, args: XClaimArgs, messageIds: List[String]): F[List[String]] = 
-    xclaimRaw(stream, consumer, args, true, messageIds)
+    xclaimraw(stream, consumer, args, true, messageIds)
 
   def xclaimdetail[F[_]: RedisCtx](stream: String, consumer: Consumer, args: XClaimArgs, messageIds: List[String]): F[List[StreamsRecord]] = 
-    xclaimRaw(stream, consumer, args, false, messageIds)
+    xclaimraw(stream, consumer, args, false, messageIds)
+
+  final case class XAutoClaimArgs(
+    consumer: Consumer,
+    minIdleTime: Long,
+    startId: String,
+    count: Option[Long] = None,
+  )
+
+  final case class XAutoClaimSummary(
+    startId: String,
+    claimedMsgIds: List[String],
+    deletedIds: List[String]
+  )
+  object XAutoClaimSummary {
+    implicit val result: RedisResult[XAutoClaimSummary] = new RedisResult[XAutoClaimSummary] {
+      def decode(resp: Resp): Either[Resp,XAutoClaimSummary] = 
+        resp match {
+          case Resp.Array(Some(startId :: claimedMsgIds :: deletedIds :: Nil)) => 
+            (RedisResult[String].decode(startId), RedisResult[List[String]].decode(claimedMsgIds), RedisResult[List[String]].decode(deletedIds))
+              .tupled
+              .map((XAutoClaimSummary.apply _).tupled)
+          case otherwise => Left(otherwise)
+        }
+    }
+  }
+  final case class XAutoClaimDetail(
+    startId: String,
+    claimedMsgIds: List[StreamsRecord],
+    deletedIds: List[String]
+  )
+  object XAutoClaimDetail {
+    implicit val result: RedisResult[XAutoClaimDetail] = new RedisResult[XAutoClaimDetail] {
+      def decode(resp: Resp): Either[Resp,XAutoClaimDetail] = 
+        resp match {
+          case Resp.Array(Some(startId :: claimedMsgs :: deletedIds :: Nil)) => 
+            (RedisResult[String].decode(startId), RedisResult[List[StreamsRecord]].decode(claimedMsgs), RedisResult[List[String]].decode(deletedIds))
+              .tupled
+              .map((XAutoClaimDetail.apply _).tupled)
+          case otherwise => Left(otherwise)
+        }
+    }
+  }
+  
+  private def xautoclaimraw[F[_]: RedisCtx, A: RedisResult](stream: String, args: XAutoClaimArgs, justId: Boolean): F[A] = {
+    val consumer = List(args.consumer.group, args.consumer.name)
+    val minIdleTime = List(args.minIdleTime.encode)
+    val startId = List(args.startId)
+    val count = args.count.toList.flatMap(l => List("COUNT", l.encode))
+    val justIdFragment = Alternative[List].guard(justId).as("JUSTID")
+    val argFragment = consumer ::: minIdleTime ::: startId ::: count ::: justIdFragment 
+    RedisCtx[F].unkeyed(NEL("XAUTOCLAIM", stream :: argFragment))
+  }
+
+  def xautoclaimsummary[F[_]: RedisCtx](stream: String, args: XAutoClaimArgs): F[XAutoClaimSummary] = 
+    xautoclaimraw(stream, args, true)
+
+  def xautoclaimdetail[F[_]: RedisCtx](stream: String, args: XAutoClaimArgs): F[XAutoClaimDetail] = 
+    xautoclaimraw(stream, args, false)
 
   def xdel[F[_]: RedisCtx](stream: String, messageIds: List[String]): F[Long] = 
     RedisCtx[F].unkeyed(NEL("XDEL", stream :: messageIds))
