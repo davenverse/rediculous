@@ -68,4 +68,118 @@ class RedisCommandsSpec extends CatsEffectSuite {
       }
     }
   }
+
+  test("xadd/xtrim parity"){
+    redisConnection().flatMap{ connection => 
+      val kv = "bar" -> "baz"
+      val action = RedisCommands.xadd[RedisIO]("foo", List(kv)).replicateA(10) >>
+        RedisCommands.xtrim[RedisIO]("foo", RedisCommands.XTrimStrategy.MaxLen(2), RedisCommands.Trimming.Exact.some) <*
+        RedisCommands.del[RedisIO]("foo")
+
+      action.run(connection).assertEquals(8)
+    }
+  }
+
+  test("xadd/xgroupread parity"){
+    redisConnection().flatMap{ connection => 
+      val msg1 = "msg1" -> "msg1"
+      val msg2 = "msg2" -> "msg2"
+      val msg3 = "msg3" -> "msg3"
+
+      val extract = (resp: Option[List[RedisCommands.XReadResponse]]) => 
+        resp.flatMap(_.headOption).flatMap(_.records.headOption).flatMap(_.keyValues.headOption)
+
+      val action = 
+        for {
+          _ <- RedisCommands.xgroupcreate[RedisIO]("foo", "group1", "$", true)
+          _ <- RedisCommands.xadd[RedisIO]("foo", List(msg1))
+          _ <- RedisCommands.xadd[RedisIO]("foo", List(msg2))
+          _ <- RedisCommands.xadd[RedisIO]("foo", List(msg3))
+          msg1 <- RedisCommands.xreadgroup[RedisIO](RedisCommands.Consumer("group1", "consumer1"), Set(RedisCommands.StreamOffset.LastConsumed("foo")), RedisCommands.XReadOpts.default.copy(count = Some(1)))
+          msg2 <- RedisCommands.xreadgroup[RedisIO](RedisCommands.Consumer("group1", "consumer2"), Set(RedisCommands.StreamOffset.LastConsumed("foo")), RedisCommands.XReadOpts.default.copy(count = Some(1)))
+          msg3 <- RedisCommands.xreadgroup[RedisIO](RedisCommands.Consumer("group1", "consumer3"), Set(RedisCommands.StreamOffset.LastConsumed("foo")), RedisCommands.XReadOpts.default.copy(count = Some(1)))
+          _ <- RedisCommands.xgroupdestroy[RedisIO]("foo", "group1")
+          _ <- RedisCommands.del[RedisIO]("foo")
+        } yield (extract(msg1), extract(msg2), extract(msg3))
+
+      action.run(connection).assertEquals((Some(msg1), Some(msg2), Some(msg3)))
+    }
+  }
+
+  test("xpendingsummary"){
+    redisConnection().flatMap{ connection => 
+      val msg1 = "msg1" -> "msg1"
+      val msg2 = "msg2" -> "msg2"
+      val msg3 = "msg3" -> "msg3"
+
+      val action = 
+        for {
+          _ <- RedisCommands.xgroupcreate[RedisIO]("foo", "group1", "$", true)
+          id1 <- RedisCommands.xadd[RedisIO]("foo", List(msg1))
+          id2 <- RedisCommands.xadd[RedisIO]("foo", List(msg2))
+          _ <- RedisCommands.xadd[RedisIO]("foo", List(msg3))
+          _ <- RedisCommands.xreadgroup[RedisIO](RedisCommands.Consumer("group1", "consumer1"), Set(RedisCommands.StreamOffset.LastConsumed("foo")), RedisCommands.XReadOpts.default.copy(count = Some(1)))
+          _ <- RedisCommands.xreadgroup[RedisIO](RedisCommands.Consumer("group1", "consumer2"), Set(RedisCommands.StreamOffset.LastConsumed("foo")), RedisCommands.XReadOpts.default.copy(count = Some(1)))
+          actual <- RedisCommands.xpendingsummary[RedisIO]("foo", "group1")
+          _ <- RedisCommands.xgroupdestroy[RedisIO]("foo", "group1")
+          _ <- RedisCommands.del[RedisIO]("foo")
+        } yield 
+          assertEquals(
+            actual, 
+            RedisCommands.XPendingSummary(2, id1, id2, List(
+              "consumer1" -> 1,
+              "consumer2" -> 1,
+            ))
+          )
+
+      action.run(connection)
+    }
+  }
+  
+  test("xclaimsummary"){
+    import RedisCommands._
+
+    redisConnection().flatMap{ connection => 
+      val addMsg = xadd[RedisIO]("foo", List("msg" -> "msg"))
+      val args = XClaimArgs(1)
+      val action = 
+        for {
+          _ <- xgroupcreate[RedisIO]("foo", "group1", "$", true)
+          id1 <- addMsg
+          id2 <- addMsg
+          id3 <- addMsg
+          id4 <- addMsg
+          _ <- xreadgroup[RedisIO](Consumer("group1", "consumer1"), Set(StreamOffset.LastConsumed("foo")), XReadOpts.default.copy(count = Some(1)))
+          _ <- xreadgroup[RedisIO](Consumer("group1", "consumer2"), Set(StreamOffset.LastConsumed("foo")))
+          actual <- xclaimsummary[RedisIO]("foo", Consumer("group1", "consumer1"), args, List(id2, id3, id4))
+          _ <- xgroupdestroy[RedisIO]("foo", "group1")
+          _ <- del[RedisIO]("foo")
+        } yield assertEquals(actual, List(id2, id3, id4))
+      action.run(connection)
+    }
+  }
+
+  test("xautoclaimsummary"){
+    import RedisCommands._
+
+    redisConnection().flatMap{ connection => 
+      val addMsg = xadd[RedisIO]("foo", List("msg" -> "msg"))
+      val args = XAutoClaimArgs(Consumer("group1", "consumer1"), 1, "0-0", Some(100))
+      val action = 
+        for {
+          _ <- xgroupcreate[RedisIO]("foo", "group1", "$", true)
+          id1 <- addMsg
+          id2 <- addMsg
+          id3 <- addMsg
+          id4 <- addMsg
+          _ <- xreadgroup[RedisIO](Consumer("group1", "consumer1"), Set(StreamOffset.LastConsumed("foo")), XReadOpts.default.copy(count = Some(1)))
+          _ <- xreadgroup[RedisIO](Consumer("group1", "consumer2"), Set(StreamOffset.LastConsumed("foo")))
+          _ <- xdel[RedisIO]("foo", List(id4))
+          actual <- xautoclaimsummary[RedisIO]("foo", args)
+          _ <- xgroupdestroy[RedisIO]("foo", "group1")
+          _ <- del[RedisIO]("foo")
+        } yield assertEquals(actual, XAutoClaimSummary("0-0", List(id1, id2, id3), List(id4)))
+      action.run(connection)
+    }
+  }
 }

@@ -264,6 +264,10 @@ object RedisCommands {
     case class Latest(stream: String) extends StreamOffset {
       override def offset: String = "$"
     }
+    /** Only applicable when using with xreadgroup */
+    case class LastConsumed(stream: String) extends StreamOffset {
+      override def offset: String = ">"
+    }
     case class From(stream: String, offset: String) extends StreamOffset 
   }
 
@@ -277,7 +281,7 @@ object RedisCommands {
       def decode(resp: Resp): Either[Resp,StreamsRecord] = {
         def two[A](l: List[A], acc: List[(A, A)] = List.empty): List[(A, A)] = l match {
           case first :: second :: rest => two(rest, (first, second):: acc)
-          case otherwise => acc.reverse
+          case _ => acc.reverse
         }
         resp match {
           case  Resp.Array(Some(Resp.BulkString(Some(recordIdBV)) :: Resp.Array(Some(rawKeyValues)) :: Nil)) => 
@@ -325,6 +329,23 @@ object RedisCommands {
     RedisCtx[F].unkeyed(NEL("XREAD", block ::: count ::: noAck ::: streamPairs))
   }
 
+  case class Consumer(group: String, name: String)
+
+  def xreadgroup[F[_]: RedisCtx](consumer: Consumer, streams: Set[StreamOffset], xreadOpts: XReadOpts = XReadOpts.default): F[Option[List[XReadResponse]]] = {
+    val group = List("GROUP", consumer.group, consumer.name)
+    val block = xreadOpts.blockMillisecond.toList.flatMap(l => List("BLOCK", l.encode))
+    val count = xreadOpts.count.toList.flatMap(l => List("COUNT", l.encode))
+    val noAck = Alternative[List].guard(xreadOpts.noAck).as("NOACK")
+    val (streamKeys, streamOffsets) = streams
+      .foldLeft((List.empty[String], List.empty[String])){ 
+        case ((keys, offsets), streamOffset) => 
+          (streamOffset.stream :: keys, streamOffset.offset :: offsets)
+      }
+    val streamPairs = "STREAMS" :: streamKeys ::: streamOffsets
+
+    RedisCtx[F].unkeyed(NEL("XREADGROUP", group ::: block ::: count ::: noAck ::: streamPairs))
+  }
+
   def xrange[F[_]: RedisCtx](stream: String, startOpt: Option[String] = None, endOpt: Option[String] = None, countOpt: Option[Int] = None): F[Option[List[StreamsRecord]]] = {
     val start = List(startOpt.getOrElse("-"))
     val end = List(endOpt.getOrElse("+"))
@@ -341,8 +362,14 @@ object RedisCommands {
     RedisCtx[F].unkeyed(NEL("XREVRANGE", stream :: end ::: start ::: count))
   }
 
-  def xgroupcreate[F[_]: RedisCtx](stream: String, groupName: String, startId: String): F[Status] = 
-    RedisCtx[F].unkeyed(NEL.of("XGROUP", "CREATE", stream, groupName, startId))
+  def xgroupcreate[F[_]: RedisCtx](stream: String, groupName: String, startId: String, mkStream: Boolean = false): F[Status] = {
+    val mkStreamFragment = Alternative[List].guard(mkStream).as("MKSTREAM")
+    RedisCtx[F].unkeyed(NEL("XGROUP", "CREATE" :: stream :: groupName :: startId :: mkStreamFragment))
+  }
+
+  @deprecated("use xgroupcreate(stream: String, groupName: String, startId: String, mkStream: Boolean) instead", "0.3.3")
+  def xgroupcreate[F[_]](stream: String, groupName: String, startId: String, ctx: RedisCtx[F]): F[Status] = 
+    xgroupcreate(stream, groupName, startId, false)(ctx)
 
   def xgroupsetid[F[_]: RedisCtx](stream: String, groupName: String, messageId: String): F[Status] = 
     RedisCtx[F].unkeyed(NEL.of("XGROUP", "SETID", stream, groupName, messageId))
@@ -356,21 +383,146 @@ object RedisCommands {
   def xack[F[_]: RedisCtx](stream: String, groupName: String, messageIds: List[String]): F[Long] = 
     RedisCtx[F].unkeyed(NEL("XACK", stream :: groupName :: messageIds))
 
-  // TODO xrange
-  // TODO xrevrange
-
   def xlen[F[_]: RedisCtx](stream: String): F[Long] = 
     RedisCtx[F].unkeyed(NEL.of("XLEN", stream))
   
-  // TODO xpendingsummary
+  sealed trait XTrimStrategy
+  object XTrimStrategy {
+    case class MaxLen(maxLen: Int) extends XTrimStrategy
+    case class MinId(minId: String) extends XTrimStrategy
+  }
+  
+  def xtrim[F[_]: RedisCtx](stream: String, strategy: XTrimStrategy, trimmingOpt: Option[Trimming] = None, limitOpt: Option[Int] = None): F[Int] = {
+    val strategyFragment = strategy match {
+      case XTrimStrategy.MaxLen(maxLen) => List("MAXLEN".some, trimmingOpt.map(_.encode), maxLen.encode.some).flatten
+      case XTrimStrategy.MinId(minId) => List("MINID".some, trimmingOpt.map(_.encode), minId.encode.some).flatten
+    }
+
+    val limit = limitOpt.toList.flatMap(l => if (trimmingOpt.contains(Trimming.Approximate)) List("LIMIT", l.encode) else List.empty)
+
+    RedisCtx[F].unkeyed(NEL("XTRIM", stream :: strategyFragment ::: limit))
+  }
+
+  final case class XPendingSummary(
+    totalPending: Long,
+    smallestId: String,
+    greatestId: String,
+    consumerPendings: List[(String, Int)]
+  )
+  object XPendingSummary {
+    implicit val result: RedisResult[XPendingSummary] = new RedisResult[XPendingSummary] {
+      def decode(resp: Resp): Either[Resp,XPendingSummary] = 
+        resp match {
+          case Resp.Array(Some(Resp.Integer(totalPending) :: Resp.BulkString(Some(smallestIdBV)) :: Resp.BulkString(Some(greatestIdBV)) :: Resp.Array(Some(list)) :: Nil)) => 
+            for {
+              smallestId <- smallestIdBV.decodeUtf8.leftMap(_ => resp)
+              greatestId <- greatestIdBV.decodeUtf8.leftMap(_ => resp)
+              consumerPendings <- list.traverse{ 
+                                    case Resp.Array(Some(Resp.BulkString(Some(consumerNameBV)) :: Resp.BulkString(Some(pendingCountBV)) :: Nil)) =>  
+                                      (consumerNameBV.decodeUtf8, pendingCountBV.decodeUtf8.map(_.toInt))
+                                        .tupled
+                                        .leftMap(_ => resp)
+                                    case _ => Left(resp)
+                                  }
+            } yield XPendingSummary(totalPending, smallestId, greatestId, consumerPendings)
+            
+          case otherwise => Left(otherwise)
+        }
+    }
+  }
+
+  def xpendingsummary[F[_]: RedisCtx](stream: String, groupName: String): F[XPendingSummary] = 
+    RedisCtx[F].unkeyed(NEL.of("XPENDING", stream, groupName))
+
   // TOOD xpendingdetail
-  // TODO xclaim
   // TODO xinfo
+
+  final case class XClaimArgs(
+    minIdleTime: Long,
+    idle: Option[Long] = None,
+    time: Option[Long] = None,
+    retrycount: Option[Long] = None,
+    force: Boolean = false,
+  )
+
+  private def xclaimraw[F[_]: RedisCtx, A: RedisResult](stream: String, consumer: Consumer, args: XClaimArgs, justId: Boolean, messageIds: List[String]): F[A] = {
+    val consumerFragment = List(consumer.group, consumer.name)
+    val minIdleTime = List(args.minIdleTime.encode)
+    val idle = args.idle.toList.flatMap(l => List("IDLE", l.encode))
+    val time = args.time.toList.flatMap(l => List("TIME", l.encode))
+    val retrycount = args.retrycount.toList.flatMap(l => List("RETRYCOUNT", l.encode))
+    val force = Alternative[List].guard(args.force).as("FORCE")
+    val justIdFragment = Alternative[List].guard(justId).as("JUSTID")
+    val argFragment = idle ::: time ::: retrycount ::: force ::: justIdFragment
+    RedisCtx[F].unkeyed(NEL("XCLAIM", stream :: consumerFragment ::: minIdleTime ::: messageIds ::: argFragment))
+  }
+
+  def xclaimsummary[F[_]: RedisCtx](stream: String, consumer: Consumer, args: XClaimArgs, messageIds: List[String]): F[List[String]] = 
+    xclaimraw(stream, consumer, args, true, messageIds)
+
+  def xclaimdetail[F[_]: RedisCtx](stream: String, consumer: Consumer, args: XClaimArgs, messageIds: List[String]): F[List[StreamsRecord]] = 
+    xclaimraw(stream, consumer, args, false, messageIds)
+
+  final case class XAutoClaimArgs(
+    consumer: Consumer,
+    minIdleTime: Long,
+    startId: String,
+    count: Option[Long] = None,
+  )
+
+  final case class XAutoClaimSummary(
+    startId: String,
+    claimedMsgIds: List[String],
+    deletedIds: List[String]
+  )
+  object XAutoClaimSummary {
+    implicit val result: RedisResult[XAutoClaimSummary] = new RedisResult[XAutoClaimSummary] {
+      def decode(resp: Resp): Either[Resp,XAutoClaimSummary] = 
+        resp match {
+          case Resp.Array(Some(startId :: claimedMsgIds :: deletedIds :: Nil)) => 
+            (RedisResult[String].decode(startId), RedisResult[List[String]].decode(claimedMsgIds), RedisResult[List[String]].decode(deletedIds))
+              .tupled
+              .map((XAutoClaimSummary.apply _).tupled)
+          case otherwise => Left(otherwise)
+        }
+    }
+  }
+  final case class XAutoClaimDetail(
+    startId: String,
+    claimedMsgs: List[StreamsRecord],
+    deletedIds: List[String]
+  )
+  object XAutoClaimDetail {
+    implicit val result: RedisResult[XAutoClaimDetail] = new RedisResult[XAutoClaimDetail] {
+      def decode(resp: Resp): Either[Resp,XAutoClaimDetail] = 
+        resp match {
+          case Resp.Array(Some(startId :: claimedMsgs :: deletedIds :: Nil)) => 
+            (RedisResult[String].decode(startId), RedisResult[List[StreamsRecord]].decode(claimedMsgs), RedisResult[List[String]].decode(deletedIds))
+              .tupled
+              .map((XAutoClaimDetail.apply _).tupled)
+          case otherwise => Left(otherwise)
+        }
+    }
+  }
+  
+  private def xautoclaimraw[F[_]: RedisCtx, A: RedisResult](stream: String, args: XAutoClaimArgs, justId: Boolean): F[A] = {
+    val consumer = List(args.consumer.group, args.consumer.name)
+    val minIdleTime = List(args.minIdleTime.encode)
+    val startId = List(args.startId)
+    val count = args.count.toList.flatMap(l => List("COUNT", l.encode))
+    val justIdFragment = Alternative[List].guard(justId).as("JUSTID")
+    val argFragment = consumer ::: minIdleTime ::: startId ::: count ::: justIdFragment 
+    RedisCtx[F].unkeyed(NEL("XAUTOCLAIM", stream :: argFragment))
+  }
+
+  def xautoclaimsummary[F[_]: RedisCtx](stream: String, args: XAutoClaimArgs): F[XAutoClaimSummary] = 
+    xautoclaimraw(stream, args, true)
+
+  def xautoclaimdetail[F[_]: RedisCtx](stream: String, args: XAutoClaimArgs): F[XAutoClaimDetail] = 
+    xautoclaimraw(stream, args, false)
 
   def xdel[F[_]: RedisCtx](stream: String, messageIds: List[String]): F[Long] = 
     RedisCtx[F].unkeyed(NEL("XDEL", stream :: messageIds))
-
-  // TODO xtrim
 
   // Simple String Commands
 
