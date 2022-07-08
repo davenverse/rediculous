@@ -182,4 +182,39 @@ class RedisCommandsSpec extends CatsEffectSuite {
       action.run(connection)
     }
   }
+
+  test("early termination"){
+    redisConnection().flatMap{ connection => 
+      val msg1 = "msg1" -> "msg1"
+      val msg2 = "msg2" -> "msg2"
+      val msg3 = "msg3" -> "msg3"
+
+      val xopts = 
+        RedisCommands.XReadOpts.default
+          // .copy(blockMillisecond = 0L.some, 1L.some)
+          .copy(count = 1L.some, blockMillisecond = 1000L.some)
+
+      val offset: Set[RedisCommands.StreamOffset] = Set(RedisCommands.StreamOffset.From("foo", "$"))
+
+      val extract = (resp: Option[List[RedisCommands.XReadResponse]]) => 
+        resp.flatMap(_.headOption).flatMap(_.records.headOption).flatMap(_.keyValues.headOption)
+
+      val action = 
+        for {
+          _ <- (
+            RedisCommands.xadd[RedisIO]("foo", List(msg1)),
+            RedisCommands.xadd[RedisIO]("foo", List(msg2)),
+            RedisCommands.xadd[RedisIO]("foo", List(msg3))
+          ).tupled.run(connection)
+          msg1 <- RedisCommands.xread[RedisIO](offset, xopts).run(connection).timeout(50.milli).attempt.map{
+            case Right(resp) => extract(resp)
+            case Left(_) => None
+          }
+          empty <- RedisCommands.xread[RedisIO](offset, xopts).run(connection).timeout(50.milli).replicateA(100).attempt
+          _ <- RedisCommands.del[RedisIO]("foo").run(connection)
+        } yield msg1
+
+      action.assertEquals(None)
+    }
+  }
 }
