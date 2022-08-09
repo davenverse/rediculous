@@ -588,7 +588,7 @@ object RedisCommands {
                 case (st, ("pending", r)) => 
                   RedisResult[List[(String, Long, Long)]]
                     .decode(r)
-                    .map(v => st.copy(pending = v.map(ConsumerPel.tupled)))
+                    .map(v => st.copy(pending = v.map((ConsumerPel.apply _).tupled)))
                 case (st, (_, _)) => st.asRight
               }
             }
@@ -620,7 +620,7 @@ object RedisCommands {
                 case (info, ("pending", r)) => 
                   RedisResult[List[(String, String, Long, Long)]]
                     .decode(r)
-                    .map(v => info.copy(pending = v.map(GroupPel.tupled)))
+                    .map(v => info.copy(pending = v.map((GroupPel.apply _).tupled)))
                 case (info, ("consumers", r)) => 
                   RedisResult[List[Consumer]]
                     .decode(r)
