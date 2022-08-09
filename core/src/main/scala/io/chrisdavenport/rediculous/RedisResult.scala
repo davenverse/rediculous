@@ -101,6 +101,26 @@ object RedisResult extends RedisResultLowPriority{
     }
   }
 
+  implicit def tuple3[A: RedisResult, B: RedisResult, C: RedisResult]: RedisResult[(A, B, C)] = new RedisResult[(A, B, C)] {
+    def decode(resp: Resp): Either[Resp,(A, B, C)] = resp match {
+      case Resp.Array(Some(x ::y :: z :: Nil)) => (RedisResult[A].decode(x), RedisResult[B].decode(y), RedisResult[C].decode(z)).tupled
+      case otherwise => Left(otherwise)
+    }
+  }
+
+  implicit def tuple4[A: RedisResult, B: RedisResult, C: RedisResult, D: RedisResult]: RedisResult[(A, B, C, D)] = new RedisResult[(A, B, C, D)] {
+    def decode(resp: Resp): Either[Resp,(A, B, C, D)] = resp match {
+      case Resp.Array(Some(a :: b :: c :: d :: Nil)) => 
+        (
+          RedisResult[A].decode(a), 
+          RedisResult[B].decode(b),
+          RedisResult[C].decode(c),
+          RedisResult[D].decode(d),
+        ).tupled
+      case otherwise => Left(otherwise)
+    }
+  }
+
   implicit def kv[K: RedisResult, V: RedisResult]: RedisResult[List[(K, V)]] = 
     new RedisResult[List[(K, V)]] {
       def decode(resp: Resp): Either[Resp,List[(K, V)]] = {
