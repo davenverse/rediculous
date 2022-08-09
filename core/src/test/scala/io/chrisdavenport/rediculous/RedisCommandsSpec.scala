@@ -53,6 +53,17 @@ class RedisCommandsSpec extends CatsEffectSuite {
     }
   }
 
+  test("scan"){
+    redisConnection().flatMap{connection => 
+      val action = RedisCommands.set[RedisIO]("foo", "bar") >> 
+        RedisCommands.scan[RedisIO](0) <* 
+        RedisCommands.del[RedisIO]("foo")
+      action.run(connection)
+    }.map{
+      assertEquals(_, 0L -> List("foo"))
+    }
+  }
+
   test("xadd/xread parity"){
     redisConnection().flatMap{ connection => 
       val kv = "bar" -> "baz"

@@ -1,6 +1,7 @@
 package io.chrisdavenport.rediculous
 
 import cats.Contravariant
+import io.chrisdavenport.rediculous.RedisProtocol.RedisType
 
 trait RedisArg[A]{
   def encode(a: A): String
@@ -35,4 +36,16 @@ object RedisArg {
       else a.toString()
   }
 
+  implicit val `type`: RedisArg[RedisType] = new RedisArg[RedisType] {
+    def encode(a: RedisType): String = 
+      a match {
+        case RedisProtocol.RedisType.String => "string"
+        case RedisProtocol.RedisType.Hash => "hash"
+        case RedisProtocol.RedisType.List => "list"
+        case RedisProtocol.RedisType.Set => "set"
+        case RedisProtocol.RedisType.Stream => "stream"
+        case RedisProtocol.RedisType.ZSet => "zset" 
+        case _ => throw RedisError.Generic(s"Rediculous: Cannot encode $a")
+      }
+  }
 }

@@ -981,6 +981,13 @@ object RedisCommands {
   def psetex[F[_]: RedisCtx](key: String, milliseconds: Long, value: String): F[Status] = 
     RedisCtx[F].keyed(key, NEL.of("PSETEX", key.encode, milliseconds.encode, value.encode))
 
+  def scan[F[_]: RedisCtx](cursor: Long, patternOpt: Option[String] = None, countOpt: Option[Long] = None, typeOpt: Option[RedisType] = None): F[(Long, List[String])] = {
+    val pattern = patternOpt.toList.flatMap(l => List("MATCH", l.encode))
+    val count = countOpt.toList.flatMap(l => List("COUNT", l.encode))
+    val `type` = typeOpt.toList.flatMap(l => List("TYPE", l.encode))
+    RedisCtx[F].unkeyed(NEL("SCAN", cursor.encode :: pattern ::: count ::: `type`))
+  }
+
   def scard[F[_]: RedisCtx](key: String): F[Long] = 
     RedisCtx[F].keyed(key, NEL.of("SCARD", key.encode))
 

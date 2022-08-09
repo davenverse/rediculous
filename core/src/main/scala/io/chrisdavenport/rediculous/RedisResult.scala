@@ -62,6 +62,7 @@ object RedisResult extends RedisResultLowPriority{
         case "hash" => RedisProtocol.RedisType.Hash
         case "list" => RedisProtocol.RedisType.List
         case "set" => RedisProtocol.RedisType.Set
+        case "stream" => RedisProtocol.RedisType.Stream
         case "zset" => RedisProtocol.RedisType.ZSet
         case _ => throw RedisError.Generic(s"Rediculous: Unhandled red type: $value")
       })
