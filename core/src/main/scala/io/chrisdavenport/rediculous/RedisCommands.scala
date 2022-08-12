@@ -696,7 +696,7 @@ object RedisCommands {
   def expire[F[_]: RedisCtx](key: String, seconds: Long): F[Boolean] = 
     RedisCtx[F].keyed(key, NEL.of("EXPIRE", key.encode, seconds.encode))
 
-  private[this] def mget[F[_]: RedisCtx](key: String): F[List[Option[String]]] = {
+  private[rediculous] def mget[F[_]: RedisCtx](key: String): F[List[Option[String]]] = {
     val cmd = NEL("MGET", key.encode :: Nil)
     RedisCtx[F].keyed(key, cmd)
   }
@@ -773,7 +773,7 @@ object RedisCommands {
   def hsetnx[F[_]: RedisCtx](key: String, field: String, value: String): F[Boolean] = 
     RedisCtx[F].keyed(key, NEL.of("HSETNX", key.encode, field.encode, value.encode))
 
-  private[this] def mset[F[_]: RedisCtx](keyvalue: (String, String)): F[Status] =
+  private[rediculous] def mset[F[_]: RedisCtx](keyvalue: (String, String)): F[Status] =
     RedisCtx[F].keyed(keyvalue._1, NEL("MSET", List(keyvalue._1.encode, keyvalue._2.encode)))
 
   def mset[F[_]: RedisCtx](keyValue: (String, String), keyValues: (String, String)*): F[List[Status]] = {
