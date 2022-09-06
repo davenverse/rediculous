@@ -15,6 +15,7 @@ object RedisProtocol {
     case object Hash extends RedisType
     case object List extends RedisType
     case object Set extends RedisType
+    case object Stream extends RedisType
     case object ZSet extends RedisType
   }
 

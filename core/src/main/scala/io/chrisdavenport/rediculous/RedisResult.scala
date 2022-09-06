@@ -62,6 +62,7 @@ object RedisResult extends RedisResultLowPriority{
         case "hash" => RedisProtocol.RedisType.Hash
         case "list" => RedisProtocol.RedisType.List
         case "set" => RedisProtocol.RedisType.Set
+        case "stream" => RedisProtocol.RedisType.Stream
         case "zset" => RedisProtocol.RedisType.ZSet
         case _ => throw RedisError.Generic(s"Rediculous: Unhandled red type: $value")
       })
@@ -97,6 +98,26 @@ object RedisResult extends RedisResultLowPriority{
   implicit def tuple[A: RedisResult, B: RedisResult]: RedisResult[(A, B)] = new RedisResult[(A, B)] {
     def decode(resp: Resp): Either[Resp,(A, B)] = resp match {
       case Resp.Array(Some(x ::y :: Nil)) => (RedisResult[A].decode(x), RedisResult[B].decode(y)).tupled
+      case otherwise => Left(otherwise)
+    }
+  }
+
+  implicit def tuple3[A: RedisResult, B: RedisResult, C: RedisResult]: RedisResult[(A, B, C)] = new RedisResult[(A, B, C)] {
+    def decode(resp: Resp): Either[Resp,(A, B, C)] = resp match {
+      case Resp.Array(Some(x ::y :: z :: Nil)) => (RedisResult[A].decode(x), RedisResult[B].decode(y), RedisResult[C].decode(z)).tupled
+      case otherwise => Left(otherwise)
+    }
+  }
+
+  implicit def tuple4[A: RedisResult, B: RedisResult, C: RedisResult, D: RedisResult]: RedisResult[(A, B, C, D)] = new RedisResult[(A, B, C, D)] {
+    def decode(resp: Resp): Either[Resp,(A, B, C, D)] = resp match {
+      case Resp.Array(Some(a :: b :: c :: d :: Nil)) => 
+        (
+          RedisResult[A].decode(a), 
+          RedisResult[B].decode(b),
+          RedisResult[C].decode(c),
+          RedisResult[D].decode(d),
+        ).tupled
       case otherwise => Left(otherwise)
     }
   }

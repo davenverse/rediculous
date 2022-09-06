@@ -53,6 +53,17 @@ class RedisCommandsSpec extends CatsEffectSuite {
     }
   }
 
+  test("scan"){
+    redisConnection().flatMap{connection => 
+      val action = RedisCommands.set[RedisIO]("foo", "bar") >> 
+        RedisCommands.scan[RedisIO](0) <* 
+        RedisCommands.del[RedisIO]("foo")
+      action.run(connection)
+    }.map{
+      assertEquals(_, 0L -> List("foo"))
+    }
+  }
+
   test("xadd/xread parity"){
     redisConnection().flatMap{ connection => 
       val kv = "bar" -> "baz"
@@ -103,6 +114,42 @@ class RedisCommandsSpec extends CatsEffectSuite {
         } yield (extract(msg1), extract(msg2), extract(msg3))
 
       action.run(connection).assertEquals((Some(msg1), Some(msg2), Some(msg3)))
+    }
+  }
+
+  test("xack"){
+    redisConnection().flatMap{ connection => 
+      import RedisCommands._
+      val msg1 = "msg1" -> "msg1"
+      val msg2 = "msg2" -> "msg2"
+      val msg3 = "msg3" -> "msg3"
+
+      val extract = (resp: Option[List[XReadResponse]]) => 
+        resp.getOrElse(List.empty).flatMap(_.records).map(_.recordId)
+
+      val consumer = Consumer("group1", "consumer1")
+
+      val action = 
+        for {
+          _       <- xgroupcreate[RedisIO]("foo", "group1", "$", true)
+          id1     <- xadd[RedisIO]("foo", List(msg1))
+          id2     <- xadd[RedisIO]("foo", List(msg2))
+          id3     <- xadd[RedisIO]("foo", List(msg3))
+          result1 <- xreadgroup[RedisIO](consumer, Set(StreamOffset.From("foo", "0-0"))).map(extract)
+          _       =  assertEquals(result1, List.empty)      // group was never read so PEL is empty
+          acked1  <- xack[RedisIO]("foo", "group1", List(id1))
+          _       =  assertEquals(acked1, 0L)               // should return 0 as nothing is in PEL
+          result2 <- xreadgroup[RedisIO](consumer, Set(StreamOffset.LastConsumed("foo"))).map(extract)
+          _       =  assertEquals(result2, List(id1, id2, id3))
+          acked2  <- xack[RedisIO]("foo", "group1", List(id1))
+          _       =  assertEquals(acked2, 1L)               // should return 1 as 1 in PEL entry
+          result3 <- xreadgroup[RedisIO](consumer, Set(StreamOffset.From("foo", "0-0"))).map(extract)
+          _       =  assertEquals(result3, List(id2, id3))  
+          _       <- xgroupdestroy[RedisIO]("foo", "group1")
+          _       <- del[RedisIO]("foo")
+        } yield ()
+
+      action.run(connection)
     }
   }
 
@@ -180,6 +227,62 @@ class RedisCommandsSpec extends CatsEffectSuite {
           _ <- del[RedisIO]("foo")
         } yield assertEquals(actual, XAutoClaimSummary("0-0", List(id1, id2, id3), List(id4)))
       action.run(connection)
+    }
+  }
+
+  test("xinfo consumer"){
+    redisConnection().flatMap{ connection => 
+      val action = 
+        for {
+          _ <- RedisCommands.xgroupcreate[RedisIO]("foo", "group1", "$", true)
+          _ <- RedisCommands.xadd[RedisIO]("foo", List("msg" -> "msg"))
+          _ <- RedisCommands.xreadgroup[RedisIO](RedisCommands.Consumer("group1", "consumer1"), Set(RedisCommands.StreamOffset.LastConsumed("foo")), RedisCommands.XReadOpts.default.copy(count = Some(1)))
+          info <- RedisCommands.xinfoconsumer[RedisIO]("foo", "group1")
+          _ <- RedisCommands.xgroupdestroy[RedisIO]("foo", "group1")
+          _ <- RedisCommands.del[RedisIO]("foo")
+        } yield info.map(_.name)
+
+      action
+        .run(connection)
+        .assertEquals(List("consumer1"))
+    }
+  }
+  
+  test("xinfo group"){
+    redisConnection().flatMap{ connection => 
+      val action = 
+        for {
+          _ <- RedisCommands.xgroupcreate[RedisIO]("foo", "group1", "$", true)
+          _ <- RedisCommands.xadd[RedisIO]("foo", List("msg" -> "msg"))
+          _ <- RedisCommands.xreadgroup[RedisIO](RedisCommands.Consumer("group1", "consumer1"), Set(RedisCommands.StreamOffset.LastConsumed("foo")), RedisCommands.XReadOpts.default.copy(count = Some(1)))
+          info <- RedisCommands.xinfogroup[RedisIO]("foo")
+          _ <- RedisCommands.xgroupdestroy[RedisIO]("foo", "group1")
+          _ <- RedisCommands.del[RedisIO]("foo")
+        } yield info.map(_.name)
+
+      action
+        .run(connection)
+        .assertEquals(List("group1"))
+    }
+  }
+
+  test("xinfo stream"){
+    redisConnection().flatMap{ connection => 
+      val action = 
+        for {
+          _ <- RedisCommands.xgroupcreate[RedisIO]("foo", "group1", "$", true)
+          _ <- RedisCommands.xadd[RedisIO]("foo", List("msg" -> "msg"))
+          _ <- RedisCommands.xreadgroup[RedisIO](RedisCommands.Consumer("group1", "consumer1"), Set(RedisCommands.StreamOffset.LastConsumed("foo")), RedisCommands.XReadOpts.default.copy(count = Some(1)))
+          info <- RedisCommands.xinfostream[RedisIO]("foo")
+          infoFull <- RedisCommands.xinfostreamfull[RedisIO]("foo")
+          _ <- RedisCommands.xgroupdestroy[RedisIO]("foo", "group1")
+          _ <- RedisCommands.del[RedisIO]("foo")
+        } yield (info, infoFull)
+
+      action
+        .run(connection)
+        .map{ case (i, f) => (i.length, f.length) }
+        .assertEquals((1L, 1L))
     }
   }
 }

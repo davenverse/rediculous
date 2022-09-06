@@ -435,7 +435,6 @@ object RedisCommands {
     RedisCtx[F].unkeyed(NEL.of("XPENDING", stream, groupName))
 
   // TOOD xpendingdetail
-  // TODO xinfo
 
   final case class XClaimArgs(
     minIdleTime: Long,
@@ -520,6 +519,210 @@ object RedisCommands {
 
   def xautoclaimdetail[F[_]: RedisCtx](stream: String, args: XAutoClaimArgs): F[XAutoClaimDetail] = 
     xautoclaimraw(stream, args, false)
+
+  final case class StreamInfo(
+    length: Long,
+    radixTreeKeys: Long,
+    radixTreeNodes: Long,
+    lastGeneratedId: String,
+    maxDeletedEntryId: String,
+    entriesAdded: Long,
+    groups: Long,
+    firstEntry: Option[StreamsRecord],
+    lastEntry: Option[StreamsRecord],
+    recordedFirstEntryId: String,
+  )
+  object StreamInfo {
+    val empty: StreamInfo = StreamInfo(0, 0, 0, "", "", 0, 0, None, None, "")
+
+    implicit val result: RedisResult[StreamInfo] = new RedisResult[StreamInfo] {
+      def decode(resp: Resp): Either[Resp, StreamInfo] = {
+        RedisResult[List[(String, Resp)]]
+          .decode(resp)
+          .flatMap{ kvs => 
+            kvs.foldLeftM[Either[Resp, *], StreamInfo](empty){
+              case (info, ("length", Resp.Integer(v))) => info.copy(length = v).asRight
+              case (info, ("radix-tree-keys", Resp.Integer(v))) => info.copy(radixTreeKeys = v).asRight
+              case (info, ("radix-tree-nodes", Resp.Integer(v))) => info.copy(radixTreeNodes = v).asRight
+              case (info, ("last-generated-id", Resp.BulkString(Some(bv)))) => bv.decodeUtf8.leftMap(_ => resp).map(v => info.copy(lastGeneratedId = v))
+              case (info, ("max-deleted-entry-id", Resp.BulkString(Some(bv)))) => bv.decodeUtf8.leftMap(_ => resp).map(v => info.copy(maxDeletedEntryId = v))
+              case (info, ("entries-added", Resp.Integer(v))) => info.copy(entriesAdded = v).asRight
+              case (info, ("groups", Resp.Integer(v))) => info.copy(groups = v).asRight
+              case (info, ("first-entry", r)) => RedisResult[Option[StreamsRecord]].decode(r).map(v => info.copy(firstEntry = v))
+              case (info, ("last-entry", r)) => RedisResult[Option[StreamsRecord]].decode(r).map(v => info.copy(lastEntry = v))
+              case (info, ("recorded-first-entry-id", Resp.BulkString(Some(bv)))) => bv.decodeUtf8.leftMap(_ => resp).map(v => info.copy(recordedFirstEntryId = v))
+              case (info, (_,_)) => info.asRight
+            }
+          }
+      }
+    }
+  }
+  
+  final case class StreamInfoFull(
+    length: Long,
+    radixTreeKeys: Long,
+    radixTreeNodes: Long,
+    lastGeneratedId: String,
+    maxDeletedEntryId: String,
+    entriesAdded: Long,
+    entries: List[StreamsRecord],
+    groups: List[StreamInfoFull.ConsumerGroupInfo],
+    recordedFirstEntryId: String,
+  )
+
+  object StreamInfoFull {
+    final case class GroupPel(entryId: String, consumerName: String, deliveryTimeMs: Long, deliveryCount: Long)
+    final case class ConsumerPel(entryId: String, deliveryTimeMs: Long, deliveryCount: Long)
+    final case class Consumer(name: String, seenTimeMs: Long, pelCount: Long, pending: List[ConsumerPel])
+    object Consumer {
+      val empty: Consumer = Consumer("", 0, 0, Nil)
+      implicit val result: RedisResult[Consumer] = new RedisResult[Consumer] {
+        def decode(resp: Resp): Either[Resp,Consumer] = 
+          RedisResult[List[(String, Resp)]]
+            .decode(resp)
+            .flatMap{ kvs => 
+              kvs.foldLeftM[Either[Resp, *], Consumer](empty){
+                case (st, ("name", Resp.BulkString(Some(bv)))) => bv.decodeUtf8.leftMap(_ => resp).map(v => st.copy(name = v))
+                case (st, ("seen-time", Resp.Integer(v))) => st.copy(seenTimeMs = v).asRight
+                case (st, ("pel-count", Resp.Integer(v))) => st.copy(pelCount = v).asRight
+                case (st, ("pending", r)) => 
+                  RedisResult[List[(String, Long, Long)]]
+                    .decode(r)
+                    .map(v => st.copy(pending = v.map((ConsumerPel.apply _).tupled)))
+                case (st, (_, _)) => st.asRight
+              }
+            }
+      }
+    }
+
+    final case class ConsumerGroupInfo(
+      name: String,
+      lastDeliveredId: String,
+      entriesRead: Long,
+      lag: Long,
+      pelCount: Long,
+      pending: List[GroupPel],
+      consumers: List[Consumer]
+    )
+    object ConsumerGroupInfo {
+      val empty: ConsumerGroupInfo = ConsumerGroupInfo("", "", 0, 0, 0, List.empty, List.empty)
+      implicit val result: RedisResult[ConsumerGroupInfo] = new RedisResult[ConsumerGroupInfo] {
+        def decode(resp: Resp): Either[Resp, ConsumerGroupInfo] = {
+          RedisResult[List[(String, Resp)]]
+            .decode(resp)
+            .flatMap{ kvs => 
+              kvs.foldLeftM[Either[Resp, *], ConsumerGroupInfo](empty){
+                case (info, ("name", Resp.BulkString(Some(bv)))) => bv.decodeUtf8.leftMap(_ => resp).map(v => info.copy(name = v))
+                case (info, ("last-delivered-id", Resp.BulkString(Some(bv)))) => bv.decodeUtf8.leftMap(_ => resp).map(v => info.copy(lastDeliveredId = v))
+                case (info, ("entries-read", Resp.Integer(v))) => info.copy(entriesRead = v).asRight
+                case (info, ("lag", Resp.Integer(v))) => info.copy(lag = v).asRight
+                case (info, ("pel-count", Resp.Integer(v))) => info.copy(pelCount = v).asRight
+                case (info, ("pending", r)) => 
+                  RedisResult[List[(String, String, Long, Long)]]
+                    .decode(r)
+                    .map(v => info.copy(pending = v.map((GroupPel.apply _).tupled)))
+                case (info, ("consumers", r)) => 
+                  RedisResult[List[Consumer]]
+                    .decode(r)
+                    .map(v => info.copy(consumers = v))
+                case (info, (_, _)) => info.asRight
+              }
+            }
+        }
+      }
+    }
+
+    val empty: StreamInfoFull = StreamInfoFull(0, 0, 0, "", "", 0, List.empty, List.empty, "")
+    implicit val result: RedisResult[StreamInfoFull] = new RedisResult[StreamInfoFull] {
+      def decode(resp: Resp): Either[Resp, StreamInfoFull] = {
+        RedisResult[List[(String, Resp)]]
+          .decode(resp)
+          .flatMap{ kvs => 
+            kvs.foldLeftM[Either[Resp, *], StreamInfoFull](empty){
+              case (info, ("length", Resp.Integer(v))) => info.copy(length = v).asRight
+              case (info, ("radix-tree-keys", Resp.Integer(v))) => info.copy(radixTreeKeys = v).asRight
+              case (info, ("radix-tree-nodes", Resp.Integer(v))) => info.copy(radixTreeNodes = v).asRight
+              case (info, ("last-generated-id", Resp.BulkString(Some(bv)))) => bv.decodeUtf8.leftMap(_ => resp).map(v => info.copy(lastGeneratedId = v))
+              case (info, ("max-deleted-entry-id", Resp.BulkString(Some(bv)))) => bv.decodeUtf8.leftMap(_ => resp).map(v => info.copy(maxDeletedEntryId = v))
+              case (info, ("entries-added", Resp.Integer(v))) => info.copy(entriesAdded = v).asRight
+              case (info, ("entries", r)) => RedisResult[List[StreamsRecord]].decode(r).map(v => info.copy(entries = v))
+              case (info, ("groups", r)) => RedisResult[List[ConsumerGroupInfo]].decode(r).map(v => info.copy(groups = v))
+              case (info, ("recorded-first-entry-id", Resp.BulkString(Some(bv)))) => bv.decodeUtf8.leftMap(_ => resp).map(v => info.copy(recordedFirstEntryId = v))
+              case (info, (_, _)) => info.asRight
+            }
+          }
+      }
+    }
+  }
+
+  private def xinfostreamraw[F[_]: RedisCtx, A: RedisResult](stream: String, fullOpt: Boolean, countOpt: Option[Int]): F[A] = {
+    val full = Alternative[List].guard(fullOpt).as("FULL")
+    val count = countOpt.toList.flatMap(c => List("COUNT", c.encode))
+    RedisCtx[F].unkeyed(NEL("XINFO", "STREAM" :: stream :: full ::: count))
+  }
+
+  def xinfostream[F[_]: RedisCtx](stream: String): F[StreamInfo] = 
+    xinfostreamraw(stream, false, None)
+
+  def xinfostreamfull[F[_]: RedisCtx](stream: String, countOpt: Option[Int] = None): F[StreamInfoFull] = 
+    xinfostreamraw(stream, true, countOpt)
+
+  final case class StreamConsumersInfo(
+    name: String,
+    pending: Long,
+    idleMs: Long
+  )
+  object StreamConsumersInfo {
+    val empty: StreamConsumersInfo = StreamConsumersInfo("", 0, 0)
+    implicit val result: RedisResult[StreamConsumersInfo] = new RedisResult[StreamConsumersInfo] {
+      def decode(resp: Resp): Either[Resp,StreamConsumersInfo] = 
+        RedisResult[List[(String, Resp)]]
+          .decode(resp)
+          .flatMap{ kvs => 
+            kvs.foldLeftM[Either[Resp, *], StreamConsumersInfo](empty){
+              case (info, ("name", Resp.BulkString(Some(bv)))) => bv.decodeUtf8.leftMap(_ => resp).map(v => info.copy(name = v))
+              case (info, ("pending", Resp.Integer(v))) => info.copy(pending = v).asRight
+              case (info, ("idle", Resp.Integer(v))) => info.copy(idleMs = v).asRight
+              case (info, (_, _)) => info.asRight
+            }
+          }
+    }
+  }
+  
+  def xinfoconsumer[F[_]: RedisCtx](stream: String, groupName: String): F[List[StreamConsumersInfo]] = 
+    RedisCtx[F].unkeyed(NEL.of("XINFO", "CONSUMERS", stream, groupName))
+
+  final case class StreamGroupsInfo(
+    name: String,
+    consumers: Long,
+    pending: Long,
+    lastDeliveredId: String,
+    entriesRead: Long,
+    lag: Long
+  )
+
+  object StreamGroupsInfo {
+    val empty: StreamGroupsInfo = StreamGroupsInfo("", 0, 0, "", 0, 0)
+    implicit val result: RedisResult[StreamGroupsInfo] = new RedisResult[StreamGroupsInfo] {
+      def decode(resp: Resp): Either[Resp,StreamGroupsInfo] = 
+        RedisResult[List[(String, Resp)]]
+          .decode(resp)
+          .flatMap{ kvs => 
+            kvs.foldLeftM[Either[Resp, *], StreamGroupsInfo](empty){
+              case (info, ("name", Resp.BulkString(Some(bv)))) => bv.decodeUtf8.leftMap(_ => resp).map(v => info.copy(name = v))
+              case (info, ("consumers", Resp.Integer(v))) => info.copy(consumers = v).asRight
+              case (info, ("pending", Resp.Integer(v))) => info.copy(pending = v).asRight
+              case (info, ("last-delivered-id", Resp.BulkString(Some(bv)))) => bv.decodeUtf8.leftMap(_ => resp).map(v => info.copy(lastDeliveredId = v))
+              case (info, ("entries-read", Resp.Integer(v))) => info.copy(entriesRead = v).asRight
+              case (info, ("lag", Resp.Integer(v))) => info.copy(lag = v).asRight
+              case (info, (_, _)) => info.asRight
+            }
+          }
+    }
+  }
+
+  def xinfogroup[F[_]: RedisCtx](stream: String): F[List[StreamGroupsInfo]] = 
+    RedisCtx[F].unkeyed(NEL.of("XINFO", "GROUPS", stream))
 
   def xdel[F[_]: RedisCtx](stream: String, messageIds: List[String]): F[Long] = 
     RedisCtx[F].unkeyed(NEL("XDEL", stream :: messageIds))
@@ -786,6 +989,13 @@ object RedisCommands {
 
   def psetex[F[_]: RedisCtx](key: String, milliseconds: Long, value: String): F[Status] = 
     RedisCtx[F].keyed(key, NEL.of("PSETEX", key.encode, milliseconds.encode, value.encode))
+
+  def scan[F[_]: RedisCtx](cursor: Long, patternOpt: Option[String] = None, countOpt: Option[Long] = None, typeOpt: Option[RedisType] = None): F[(Long, List[String])] = {
+    val pattern = patternOpt.toList.flatMap(l => List("MATCH", l.encode))
+    val count = countOpt.toList.flatMap(l => List("COUNT", l.encode))
+    val `type` = typeOpt.toList.flatMap(l => List("TYPE", l.encode))
+    RedisCtx[F].unkeyed(NEL("SCAN", cursor.encode :: pattern ::: count ::: `type`))
+  }
 
   def scard[F[_]: RedisCtx](key: String): F[Long] = 
     RedisCtx[F].keyed(key, NEL.of("SCARD", key.encode))
