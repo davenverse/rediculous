@@ -3,6 +3,7 @@ package io.chrisdavenport.rediculous
 import cats.syntax.all._
 import cats.effect._
 import munit.CatsEffectSuite
+import munit.catseffect._
 import scala.concurrent.duration._
 import _root_.io.chrisdavenport.whaletail.Docker
 import _root_.io.chrisdavenport.whaletail.manager._
@@ -37,7 +38,7 @@ class RedisStreamSpec extends CatsEffectSuite {
       "redisconnection",
       resource
     )
-  override def munitFixtures: Seq[Fixture[_]] = Seq(
+  override def munitFixtures: Seq[IOFixture[_]] = Seq(
     redisConnection
   )
   test("send a single message"){ //connection => 
