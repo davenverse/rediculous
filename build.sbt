@@ -21,7 +21,7 @@ val fs2V = "3.2.14-75-7902cbf"
 val munitCatsEffectV = "2.0-5e03bfc"
 
 ThisBuild / crossScalaVersions := Seq("2.12.15","2.13.8", "3.1.0")
-ThisBuild / scalaVersion := "2.13.6"
+ThisBuild / scalaVersion := "2.13.8"
 ThisBuild / versionScheme := Some("early-semver")
 
 ThisBuild / resolvers ++= Resolver.sonatypeOssRepos("snapshots")
@@ -78,7 +78,7 @@ lazy val examples = crossProject(JVMPlatform, JSPlatform)
     scalaJSUseMainModuleInitializer := true,
   ).jsSettings(
     libraryDependencies ++= Seq(
-      "io.github.cquiroz" %%% "scala-java-time" % "2.4.1"
+      "io.github.cquiroz" %%% "scala-java-time" % "2.4.0"
     ),
     Compile / mainClass := Some("BasicExample"),
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)},
