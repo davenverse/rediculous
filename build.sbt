@@ -24,6 +24,8 @@ ThisBuild / crossScalaVersions := Seq("2.12.15","2.13.8", "3.1.0")
 ThisBuild / scalaVersion := "2.13.6"
 ThisBuild / versionScheme := Some("early-semver")
 
+ThisBuild / resolvers ++= Resolver.sonatypeOssRepos("snapshots")
+
 // Projects
 lazy val `rediculous` = tlCrossRootProject
   .aggregate(core, examples)
@@ -48,7 +50,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.typelevel"               %%% "keypool"                    % "0.4.7-270-390cae0",
       
 
-      // "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.3.1" % Test,
+      "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.3.1+42-10cfcefe-SNAPSHOT" % Test,
       "org.typelevel"               %%% "munit-cats-effect"        % munitCatsEffectV         % Test,
       "org.scalameta"               %%% "munit-scalacheck"            % "1.0.0-M6" % Test,
     ),
