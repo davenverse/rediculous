@@ -15,7 +15,7 @@ ThisBuild / tlSonatypeUseLegacyHost := true
 
 
 val catsV = "2.8.0"
-val catsEffectV = "3.3.14-2-0972521"
+val catsEffectV = "3.3.14-5-4591364"
 val fs2V = "3.2.14-75-7902cbf"
 
 val munitCatsEffectV = "2.0-5e03bfc"
