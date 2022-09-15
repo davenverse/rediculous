@@ -3,6 +3,7 @@ package io.chrisdavenport.rediculous
 import cats.syntax.all._
 import cats.effect._
 import munit.CatsEffectSuite
+import munit.catseffect._
 import scala.concurrent.duration._
 import _root_.io.chrisdavenport.whaletail.Docker
 import _root_.io.chrisdavenport.whaletail.manager._
@@ -32,12 +33,11 @@ class RedisCommandsSpec extends CatsEffectSuite {
     } yield connection 
     
   )
-  // Not available on scala.js
   val redisConnection = UnsafeResourceSuiteLocalDeferredFixture(
       "redisconnection",
       resource
     )
-  override def munitFixtures: Seq[Fixture[_]] = Seq(
+  override def munitFixtures: Seq[IOFixture[_]] = Seq(
     redisConnection
   )
   test("set/get parity"){ //connection => 

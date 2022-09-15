@@ -14,22 +14,22 @@ ThisBuild / tlCiReleaseBranches := Seq("main")
 ThisBuild / tlSonatypeUseLegacyHost := true
 
 
-val catsV = "2.7.0"
-val catsEffectV = "3.3.3"
-val fs2V = "3.2.3"
+val catsV = "2.8.0"
+val catsEffectV = "3.3.14"
+val fs2V = "3.3.0"
 
-val munitCatsEffectV = "1.0.7"
+val munitCatsEffectV = "2.0.0-M3"
 
-ThisBuild / crossScalaVersions := Seq("2.12.15","2.13.8", "3.1.0")
-ThisBuild / scalaVersion := "2.13.6"
+ThisBuild / crossScalaVersions := Seq("2.12.15","2.13.8", "3.1.3")
+ThisBuild / scalaVersion := "2.13.8"
 ThisBuild / versionScheme := Some("early-semver")
 
 // Projects
 lazy val `rediculous` = tlCrossRootProject
-  .aggregate(core.jvm, core.js, examples.jvm, examples.js)
+  .aggregate(core, examples)
 
-lazy val core = crossProject(JVMPlatform, JSPlatform)
-  .crossType(CrossType.Pure)
+lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  // .crossType(CrossType.Pure)
   .in(file("core"))
   .settings(
     name := "rediculous",
@@ -45,19 +45,23 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
       "co.fs2"                      %%% "fs2-io"                     % fs2V,
       "co.fs2"                      %%% "fs2-scodec"                 % fs2V,
 
-      "org.typelevel"               %%% "keypool"                    % "0.4.6",
+      "org.typelevel"               %%% "keypool"                    % "0.4.8",
       
 
-      "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.3.1" % Test,
-      "org.typelevel"               %%% "munit-cats-effect-3"        % munitCatsEffectV         % Test,
-      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.8" % Test,
-      "org.scalameta"               %%% "munit-scalacheck"            % "0.7.27" % Test,
+      "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.3.2" % Test,
+      "org.typelevel"               %%% "munit-cats-effect"          % munitCatsEffectV         % Test,
+      "org.scalameta"               %%% "munit-scalacheck"            % "1.0.0-M6" % Test,
     ),
-    libraryDependencies += "org.scodec" %%% "scodec-core" % (if (scalaVersion.value.startsWith("2.")) "1.11.9" else "2.1.0")
+    libraryDependencies += "org.scodec" %%% "scodec-core" % (if (scalaVersion.value.startsWith("2.")) "1.11.10" else "2.2.0")
   ).jsSettings(
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)}
   ).jvmSettings(
     libraryDependencies += "com.github.jnr" % "jnr-unixsocket" % "0.38.15" % Test,
+  )
+  .platformsSettings(JVMPlatform, JSPlatform)(
+    libraryDependencies ++= Seq(
+      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.8" % Test,
+    )
   )
 
 lazy val examples = crossProject(JVMPlatform, JSPlatform)
@@ -72,7 +76,7 @@ lazy val examples = crossProject(JVMPlatform, JSPlatform)
     scalaJSUseMainModuleInitializer := true,
   ).jsSettings(
     libraryDependencies ++= Seq(
-      "io.github.cquiroz" %%% "scala-java-time" % "2.3.0"
+      "io.github.cquiroz" %%% "scala-java-time" % "2.4.0"
     ),
     Compile / mainClass := Some("BasicExample"),
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)},
