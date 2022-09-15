@@ -15,16 +15,14 @@ ThisBuild / tlSonatypeUseLegacyHost := true
 
 
 val catsV = "2.8.0"
-val catsEffectV = "3.3.14-5-4591364"
-val fs2V = "3.2.14-75-7902cbf"
+val catsEffectV = "3.3.14"
+val fs2V = "3.3.0"
 
-val munitCatsEffectV = "2.0-5e03bfc"
+val munitCatsEffectV = "2.0.0-M3"
 
 ThisBuild / crossScalaVersions := Seq("2.12.15","2.13.8", "3.1.3")
 ThisBuild / scalaVersion := "2.13.8"
 ThisBuild / versionScheme := Some("early-semver")
-
-ThisBuild / resolvers ++= Resolver.sonatypeOssRepos("snapshots")
 
 // Projects
 lazy val `rediculous` = tlCrossRootProject
@@ -47,11 +45,11 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "co.fs2"                      %%% "fs2-io"                     % fs2V,
       "co.fs2"                      %%% "fs2-scodec"                 % fs2V,
 
-      "org.typelevel"               %%% "keypool"                    % "0.4.7-270-390cae0",
+      "org.typelevel"               %%% "keypool"                    % "0.4.8",
       
 
-      "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.3.1+42-10cfcefe-SNAPSHOT" % Test,
-      "org.typelevel"               %%% "munit-cats-effect"        % munitCatsEffectV         % Test,
+      "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.3.2" % Test,
+      "org.typelevel"               %%% "munit-cats-effect"          % munitCatsEffectV         % Test,
       "org.scalameta"               %%% "munit-scalacheck"            % "1.0.0-M6" % Test,
     ),
     libraryDependencies += "org.scodec" %%% "scodec-core" % (if (scalaVersion.value.startsWith("2.")) "1.11.10" else "2.2.0")
