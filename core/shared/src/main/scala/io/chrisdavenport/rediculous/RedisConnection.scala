@@ -231,7 +231,8 @@ object RedisConnection{
       TLSParameters.Default,
       Defaults.maxQueued,
       Defaults.workers,
-      Defaults.chunkSizeLimit
+      Defaults.chunkSizeLimit,
+      Queue.bounded(_),
     )
 
   class QueuedConnectionBuilder[F[_]: Async] private[RedisConnection](
@@ -243,7 +244,8 @@ object RedisConnection{
     private val maxQueued: Int,
     private val workers: Int,
     private val chunkSizeLimit: Int,
-  ) { self => 
+    private val mkQueue: Int => F[Queue[F, Chunk[(Either[Throwable,Resp] => F[Unit], Resp)]]],
+  ) { self =>
 
     private def copy(
       sg: SocketGroup[F] = self.sg,
@@ -254,6 +256,7 @@ object RedisConnection{
       maxQueued: Int = self.maxQueued,
       workers: Int = self.workers,
       chunkSizeLimit: Int = self.chunkSizeLimit,
+      mkQueue: Int => F[Queue[F, Chunk[(Either[Throwable,Resp] => F[Unit], Resp)]]] = self.mkQueue,
     ): QueuedConnectionBuilder[F] = new QueuedConnectionBuilder(
       sg,
       host,
@@ -262,7 +265,8 @@ object RedisConnection{
       tlsParameters,
       maxQueued,
       workers,
-      chunkSizeLimit
+      chunkSizeLimit,
+      mkQueue,
     )
 
     def withHost(host: Host) = copy(host = host)
@@ -276,9 +280,12 @@ object RedisConnection{
     def withWorkers(workers: Int) = copy(workers = workers)
     def withChunkSizeLimit(chunkSizeLimit: Int) = copy(chunkSizeLimit = chunkSizeLimit)
 
+    def circularBuffer = copy(mkQueue = Queue.circularBuffer)
+    def dropping = copy(mkQueue = Queue.dropping)
+
     def build: Resource[F,RedisConnection[F]] = {
       for {
-        queue <- Resource.eval(Queue.bounded[F, Chunk[(Either[Throwable,Resp] => F[Unit], Resp)]](maxQueued))
+        queue <- Resource.eval(mkQueue(maxQueued))
         keypool <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
           {_ => sg.client(SocketAddress(host,port), Nil)
             .flatMap(elevateSocket(_, tlsContext, tlsParameters))
