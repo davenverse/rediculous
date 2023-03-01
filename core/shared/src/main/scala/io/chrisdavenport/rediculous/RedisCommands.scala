@@ -40,7 +40,7 @@ object RedisCommands {
   def zrevrange[F[_]: RedisCtx](key: String, start: Long, stop: Long): F[List[String]] = 
     RedisCtx[F].keyed(key, NEL.of("ZREVRANGE", key.encode, start.encode, stop.encode))
 
-  def zrevrangewithscores[F[_]: RedisCtx](key: String, start: Long, stop: Long): F[List[(String, Double)]] = 
+  def zrevrangewithscores[F[_]: RedisCtx](key: String, start: Long, stop: Long): F[List[(String, Double)]] =
     RedisCtx[F].keyed(key, NEL.of("ZREVRANGE", key.encode, start.encode, stop.encode, "WITHSCORES"))
 
   def zrangebyscore[F[_]: RedisCtx](key: String, min: Double, max: Double): F[List[String]] = 
@@ -456,10 +456,18 @@ object RedisCommands {
     RedisCtx[F].unkeyed(NEL("XCLAIM", stream :: consumerFragment ::: minIdleTime ::: messageIds ::: argFragment))
   }
 
+  def auth[F[_]: RedisCtx](username: String, password: String): F[Status] = {
+    RedisCtx[F].unkeyed(NEL("AUTH", username :: password :: Nil))
+  }
+
+  def auth[F[_]: RedisCtx](password: String): F[Status] = {
+    RedisCtx[F].unkeyed(NEL("AUTH", password :: Nil))
+  }
+
   def xclaimsummary[F[_]: RedisCtx](stream: String, consumer: Consumer, args: XClaimArgs, messageIds: List[String]): F[List[String]] = 
     xclaimraw(stream, consumer, args, true, messageIds)
 
-  def xclaimdetail[F[_]: RedisCtx](stream: String, consumer: Consumer, args: XClaimArgs, messageIds: List[String]): F[List[StreamsRecord]] = 
+  def xclaimdetail[F[_]: RedisCtx](stream: String, consumer: Consumer, args: XClaimArgs, messageIds: List[String]): F[List[StreamsRecord]] =
     xclaimraw(stream, consumer, args, false, messageIds)
 
   final case class XAutoClaimArgs(

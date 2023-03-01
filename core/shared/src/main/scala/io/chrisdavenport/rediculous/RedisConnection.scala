@@ -135,7 +135,8 @@ object RedisConnection{
       Defaults.host,
       Defaults.port,
       None,
-      TLSParameters.Default
+      TLSParameters.Default,
+      None
     )
 
   class DirectConnectionBuilder[F[_]: Concurrent] private[RedisConnection](
@@ -143,7 +144,8 @@ object RedisConnection{
     val host: Host,
     val port: Port,
     private val tlsContext: Option[TLSContext[F]],
-    private val tlsParameters: TLSParameters 
+    private val tlsParameters: TLSParameters,
+    private val auth: Option[(Option[String], String)],
   ) { self => 
 
     private def copy(
@@ -151,13 +153,15 @@ object RedisConnection{
       host: Host = self.host,
       port: Port = self.port,
       tlsContext: Option[TLSContext[F]] = self.tlsContext,
-      tlsParameters: TLSParameters = self.tlsParameters
+      tlsParameters: TLSParameters = self.tlsParameters,
+      auth: Option[(Option[String], String)] = self.auth,
     ): DirectConnectionBuilder[F] = new DirectConnectionBuilder(
       sg,
       host,
       port,
       tlsContext,
-      tlsParameters
+      tlsParameters,
+      auth
     )
 
     def withHost(host: Host) = copy(host = host)
@@ -166,11 +170,20 @@ object RedisConnection{
     def withoutTLSContext = copy(tlsContext = None)
     def withTLSParameters(tlsParameters: TLSParameters) = copy(tlsParameters = tlsParameters)
     def withSocketGroup(sg: SocketGroup[F]) = copy(sg = sg)
+    def withAuth(username: Option[String], password: String) = copy(auth = Some((username, password)))
+    def withoutAuth = copy(auth = None)
 
     def build: Resource[F,RedisConnection[F]] = 
       for {
         socket <- sg.client(SocketAddress(host,port), Nil)
         out <- elevateSocket(socket, tlsContext, tlsParameters)
+        _ <- Resource.eval(auth match {
+          case None => ().pure[F]
+          case Some((Some(username), password)) =>
+            RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(out)).void
+          case Some((None, password)) =>
+            RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(out)).void
+        })
       } yield RedisConnection.DirectConnection(out)
   }
 
@@ -180,7 +193,8 @@ object RedisConnection{
       Defaults.host,
       Defaults.port,
       None,
-      TLSParameters.Default
+      TLSParameters.Default,
+      None
     )
 
   class PooledConnectionBuilder[F[_]: Async] private[RedisConnection] (
@@ -188,21 +202,24 @@ object RedisConnection{
     val host: Host,
     val port: Port,
     private val tlsContext: Option[TLSContext[F]],
-    private val tlsParameters: TLSParameters 
-  ) { self => 
+    private val tlsParameters: TLSParameters,
+    private val auth: Option[(Option[String], String)]
+  ) { self =>
 
     private def copy(
       sg: SocketGroup[F] = self.sg,
       host: Host = self.host,
       port: Port = self.port,
       tlsContext: Option[TLSContext[F]] = self.tlsContext,
-      tlsParameters: TLSParameters = self.tlsParameters
+      tlsParameters: TLSParameters = self.tlsParameters,
+      auth: Option[(Option[String], String)] = self.auth,
     ): PooledConnectionBuilder[F] = new PooledConnectionBuilder(
       sg,
       host,
       port,
       tlsContext,
-      tlsParameters
+      tlsParameters,
+      auth
     )
 
     def withHost(host: Host) = copy(host = host)
@@ -211,18 +228,30 @@ object RedisConnection{
     def withoutTLSContext = copy(tlsContext = None)
     def withTLSParameters(tlsParameters: TLSParameters) = copy(tlsParameters = tlsParameters)
     def withSocketGroup(sg: SocketGroup[F]) = copy(sg = sg)
+    def withAuth(username: Option[String], password: String) = copy(auth = Some((username, password)))
+    def withoutAuth = copy(auth = None)
 
     def build: Resource[F,RedisConnection[F]] = 
       KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
         {_ => sg.client(SocketAddress(host,port), Nil)
           .flatMap(elevateSocket(_, tlsContext, tlsParameters))
+          .evalTap(socket =>
+            auth match {
+              case None => ().pure[F]
+              case Some((Some(username), password)) =>
+                RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(socket)).void
+              case Some((None, password)) =>
+                RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(socket)).void
+            }
+          )
           .allocated
         },
         { case (_, shutdown) => shutdown}
       ).build.map(PooledConnection[F](_))
+
   }
 
-  def queued[F[_]: Async]: QueuedConnectionBuilder[F] = 
+  def queued[F[_]: Async]: QueuedConnectionBuilder[F] =
     new QueuedConnectionBuilder(
       Network[F],
       Defaults.host,
@@ -231,7 +260,8 @@ object RedisConnection{
       TLSParameters.Default,
       Defaults.maxQueued,
       Defaults.workers,
-      Defaults.chunkSizeLimit
+      Defaults.chunkSizeLimit,
+      None
     )
 
   class QueuedConnectionBuilder[F[_]: Async] private[RedisConnection](
@@ -243,6 +273,7 @@ object RedisConnection{
     private val maxQueued: Int,
     private val workers: Int,
     private val chunkSizeLimit: Int,
+    private val auth: Option[(Option[String], String)],
   ) { self => 
 
     private def copy(
@@ -254,6 +285,7 @@ object RedisConnection{
       maxQueued: Int = self.maxQueued,
       workers: Int = self.workers,
       chunkSizeLimit: Int = self.chunkSizeLimit,
+      auth: Option[(Option[String], String)] = self.auth
     ): QueuedConnectionBuilder[F] = new QueuedConnectionBuilder(
       sg,
       host,
@@ -262,7 +294,8 @@ object RedisConnection{
       tlsParameters,
       maxQueued,
       workers,
-      chunkSizeLimit
+      chunkSizeLimit,
+      auth,
     )
 
     def withHost(host: Host) = copy(host = host)
@@ -275,6 +308,8 @@ object RedisConnection{
     def withMaxQueued(maxQueued: Int) = copy(maxQueued = maxQueued)
     def withWorkers(workers: Int) = copy(workers = workers)
     def withChunkSizeLimit(chunkSizeLimit: Int) = copy(chunkSizeLimit = chunkSizeLimit)
+    def withAuth(username: Option[String], password: String) = copy(auth = Some((username, password)))
+    def withoutAuth = copy(auth = None)
 
     def build: Resource[F,RedisConnection[F]] = {
       for {
@@ -282,6 +317,15 @@ object RedisConnection{
         keypool <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
           {_ => sg.client(SocketAddress(host,port), Nil)
             .flatMap(elevateSocket(_, tlsContext, tlsParameters))
+            .evalTap(socket =>
+              auth match {
+                case None => ().pure[F]
+                case Some((Some(username), password)) =>
+                  RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(socket)).void
+                case Some((None, password)) =>
+                  RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(socket)).void
+              }
+            )
             .allocated
           },
           { case (_, shutdown) => shutdown}
@@ -332,7 +376,8 @@ object RedisConnection{
       Defaults.chunkSizeLimit,
       Defaults.clusterParallelServerCalls,
       Defaults.clusterUseDynamicRefreshSource,
-      Defaults.clusterCacheTopologySeconds
+      Defaults.clusterCacheTopologySeconds,
+      None
     )
 
   class ClusterConnectionBuilder[F[_]: Async] private[RedisConnection] (
@@ -347,6 +392,7 @@ object RedisConnection{
     private val parallelServerCalls: Int = Int.MaxValue,
     private val useDynamicRefreshSource: Boolean = true, // Set to false to only use initially provided host for topology refresh
     private val cacheTopologySeconds: FiniteDuration = 1.second, // How long topology will not be rechecked for after a succesful refresh
+    private val auth: Option[(Option[String], String)],
   ) { self => 
 
     private def copy(
@@ -360,7 +406,8 @@ object RedisConnection{
       chunkSizeLimit: Int = self.chunkSizeLimit,
       parallelServerCalls: Int = self.parallelServerCalls,
       useDynamicRefreshSource: Boolean = self.useDynamicRefreshSource,
-      cacheTopologySeconds: FiniteDuration = self.cacheTopologySeconds
+      cacheTopologySeconds: FiniteDuration = self.cacheTopologySeconds,
+      auth: Option[(Option[String], String)] = self.auth,
     ): ClusterConnectionBuilder[F] = new ClusterConnectionBuilder(
       sg,
       host,
@@ -372,7 +419,8 @@ object RedisConnection{
       chunkSizeLimit,
       parallelServerCalls,
       useDynamicRefreshSource,
-      cacheTopologySeconds
+      cacheTopologySeconds,
+      auth
     )
 
     def withHost(host: Host) = copy(host = host)
@@ -381,6 +429,9 @@ object RedisConnection{
     def withoutTLSContext = copy(tlsContext = None)
     def withTLSParameters(tlsParameters: TLSParameters) = copy(tlsParameters = tlsParameters)
     def withSocketGroup(sg: SocketGroup[F]) = copy(sg = sg)
+
+    def withAuth(username: Option[String], password: String) = copy(auth = Some((username, password)))
+    def withoutAuth = copy(auth = None)
 
     def withMaxQueued(maxQueued: Int) = copy(maxQueued = maxQueued)
     def withWorkers(workers: Int) = copy(workers = workers)
@@ -395,6 +446,15 @@ object RedisConnection{
         keypool <- KeyPoolBuilder[F, (Host, Port), (Socket[F], F[Unit])](
           {(t: (Host, Port)) => sg.client(SocketAddress(host,port), Nil)
               .flatMap(elevateSocket(_, tlsContext, tlsParameters))
+              .evalTap(socket =>
+                auth match {
+                  case None => ().pure[F]
+                  case Some((Some(username), password)) =>
+                    RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(socket)).void
+                  case Some((None, password)) =>
+                    RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(socket)).void
+                }
+              )
               .allocated
           },
           { case (_, shutdown) => shutdown}
