@@ -143,7 +143,7 @@ object RedisConnection{
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
-  private[rediculous] def direct[F[_]: Async]: DirectConnectionBuilder[F] =
+  def direct[F[_]: Async]: DirectConnectionBuilder[F] =
     direct(Async[F], Network.forAsync[F])
 
   class DirectConnectionBuilder[F[_]: Temporal: Network] private[RedisConnection](
@@ -216,7 +216,7 @@ object RedisConnection{
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
-  private def pool[F[_]: Async]: PooledConnectionBuilder[F] =
+  def pool[F[_]: Async]: PooledConnectionBuilder[F] =
     pool(Async[F], Network.forAsync[F])
 
   class PooledConnectionBuilder[F[_]: Temporal: Network] private[RedisConnection] (
@@ -299,7 +299,7 @@ object RedisConnection{
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
-  private[rediculous] def queued[F[_]: Async]: QueuedConnectionBuilder[F] =
+  def queued[F[_]: Async]: QueuedConnectionBuilder[F] =
     queued(Async[F], Network.forAsync[F])
 
   class QueuedConnectionBuilder[F[_]: Temporal : Network] private[RedisConnection](
@@ -432,7 +432,7 @@ object RedisConnection{
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
-  private[rediculous] def cluster[F[_]: Async]: ClusterConnectionBuilder[F] =
+  def cluster[F[_]: Async]: ClusterConnectionBuilder[F] =
     cluster(Async[F], Network[F])
 
   class ClusterConnectionBuilder[F[_]: Async: Network] private[RedisConnection] (
