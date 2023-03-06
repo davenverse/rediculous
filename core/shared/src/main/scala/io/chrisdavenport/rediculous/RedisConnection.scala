@@ -129,7 +129,7 @@ object RedisConnection{
     val clusterCacheTopologySeconds: FiniteDuration = 1.second // How long topology will not be rechecked for after a succesful refresh
   }
 
-  def direct[F[_]: Async]: DirectConnectionBuilder[F] = 
+  def direct[F[_]: Concurrent: Network]: DirectConnectionBuilder[F] =
     new DirectConnectionBuilder(
       Network[F],
       Defaults.host,
@@ -137,6 +137,10 @@ object RedisConnection{
       None,
       TLSParameters.Default
     )
+
+  @deprecated("Use overload that takes a Network", "0.4.1")
+  def direct[F[_]](F: Async[F]): DirectConnectionBuilder[F] =
+    direct(F, Network.forAsync(F))
 
   class DirectConnectionBuilder[F[_]: Concurrent] private[RedisConnection](
     private val sg: SocketGroup[F],
@@ -174,7 +178,7 @@ object RedisConnection{
       } yield RedisConnection.DirectConnection(out)
   }
 
-  def pool[F[_]: Async]: PooledConnectionBuilder[F] = 
+  def pool[F[_]: Temporal: Network]: PooledConnectionBuilder[F] =
     new PooledConnectionBuilder(
       Network[F],
       Defaults.host,
@@ -183,7 +187,11 @@ object RedisConnection{
       TLSParameters.Default
     )
 
-  class PooledConnectionBuilder[F[_]: Async] private[RedisConnection] (
+  @deprecated("Use overload that takes a Network", "0.4.1")
+  def pool[F[_]](F: Async[F]): PooledConnectionBuilder[F] =
+    pool(F, Network.forAsync(F))
+
+  class PooledConnectionBuilder[F[_]: Temporal] private[RedisConnection] (
     private val sg: SocketGroup[F],
     val host: Host,
     val port: Port,
@@ -222,7 +230,7 @@ object RedisConnection{
       ).build.map(PooledConnection[F](_))
   }
 
-  def queued[F[_]: Async]: QueuedConnectionBuilder[F] = 
+  def queued[F[_]: Temporal: Network]: QueuedConnectionBuilder[F] =
     new QueuedConnectionBuilder(
       Network[F],
       Defaults.host,
@@ -234,7 +242,11 @@ object RedisConnection{
       Defaults.chunkSizeLimit
     )
 
-  class QueuedConnectionBuilder[F[_]: Async] private[RedisConnection](
+  @deprecated("Use overload that takes a Network", "0.4.1")
+  def queued[F[_]](F: Async[F]): QueuedConnectionBuilder[F] =
+    queued(F, Network.forAsync(F))
+
+  class QueuedConnectionBuilder[F[_]: Temporal] private[RedisConnection](
     private val sg: SocketGroup[F],
     val host: Host,
     val port: Port,
@@ -320,7 +332,7 @@ object RedisConnection{
     }
   }
 
-  def cluster[F[_]: Async]: ClusterConnectionBuilder[F] = 
+  def cluster[F[_]: Async: Network]: ClusterConnectionBuilder[F] =
     new ClusterConnectionBuilder(
       Network[F],
       Defaults.host,
@@ -334,6 +346,10 @@ object RedisConnection{
       Defaults.clusterUseDynamicRefreshSource,
       Defaults.clusterCacheTopologySeconds
     )
+
+  @deprecated("Use overload that takes a Network", "0.4.1")
+  def cluster[F[_]](F: Async[F]): ClusterConnectionBuilder[F] =
+    cluster(F, Network.forAsync(F))
 
   class ClusterConnectionBuilder[F[_]: Async] private[RedisConnection] (
     private val sg: SocketGroup[F],
