@@ -20,6 +20,7 @@ object AuthExample extends IOApp.Simple {
         .withMaxQueued(10000)
         .withWorkers(1)
         .withAuth(None, pass)
+        .withTLS
         .build
 
     val auth = RedisCommands.auth[Redis[IO, *]](pass)
