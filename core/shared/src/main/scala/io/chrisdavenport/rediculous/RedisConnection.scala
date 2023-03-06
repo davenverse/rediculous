@@ -414,7 +414,7 @@ object RedisConnection{
     }
   }
 
-  def cluster[F[_]: Temporal: Network]: ClusterConnectionBuilder[F] =
+  def cluster[F[_]: Async: Network]: ClusterConnectionBuilder[F] =
     new ClusterConnectionBuilder(
       Network[F],
       Defaults.host,
@@ -435,7 +435,7 @@ object RedisConnection{
   private[rediculous] def cluster[F[_]: Async]: ClusterConnectionBuilder[F] =
     cluster(Async[F], Network[F])
 
-  class ClusterConnectionBuilder[F[_]: Temporal: Network] private[RedisConnection] (
+  class ClusterConnectionBuilder[F[_]: Async: Network] private[RedisConnection] (
     private val sg: SocketGroup[F],
     val host: Host,
     val port: Port,
@@ -534,7 +534,7 @@ object RedisConnection{
         refreshTopology = refreshLock.permit.use(_ =>
           (
             refTopology.get
-              .flatMap{ case (topo, setAt) => 
+              .flatMap{ case (topo, setAt) =>
                 if (useDynamicRefreshSource) 
                   Applicative[F].pure((NonEmptyList((host, port), topo.l.flatMap(c => c.replicas).map(r => (r.host, r.port))), setAt))
                 else 
@@ -558,7 +558,7 @@ object RedisConnection{
             Stream.fromQueueUnterminatedChunk(queue, chunkSizeLimit).chunks.map{chunk =>
               val s = if (chunk.nonEmpty) {
                 Stream.eval(refTopology.get).map{ case (topo,_) => 
-                  Stream.eval(topo.random[F]).flatMap{ default => 
+                  Stream.eval(topo.random[F]).flatMap{ default =>
                   Stream.emits(
                       chunk.toList.groupBy{ case (_, s, server,_,_) => // TODO Investigate Efficient Group By
                       server.orElse(s.flatMap(key => topo.served(HashSlot.find(key)))).getOrElse(default) // Explicitly Set Server, Key Hashslot Server, or a default server if none selected.

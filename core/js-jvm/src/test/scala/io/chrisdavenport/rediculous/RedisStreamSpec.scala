@@ -9,6 +9,7 @@ import _root_.io.chrisdavenport.whaletail.Docker
 import _root_.io.chrisdavenport.whaletail.manager._
 import com.comcast.ip4s.Host
 import com.comcast.ip4s.Port
+import _root_.fs2.io.net.Network
 
 class RedisStreamSpec extends CatsEffectSuite {
   val resource = Docker.default[IO].flatMap(client => 
@@ -29,7 +30,7 @@ class RedisStreamSpec extends CatsEffectSuite {
       (hostS, portI) = t
       host <- Resource.eval(Host.fromString(hostS).liftTo[IO](new Throwable("Invalid Host")))
       port <- Resource.eval(Port.fromInt(portI).liftTo[IO](new Throwable("Invalid Port")))
-      connection <- RedisConnection.queued[IO].withHost(host).withPort(port).build
+      connection <- RedisConnection.queued[IO](Async[IO], Network[IO]).withHost(host).withPort(port).build
     } yield connection 
     
   )
@@ -45,9 +46,9 @@ class RedisStreamSpec extends CatsEffectSuite {
     val messages = fs2.Chunk.singleton(
       RedisStream.XAddMessage("foo", List("bar" -> "baz", "zoom" -> "zad"))
     )
-    redisConnection().flatMap{connection => 
-      
-      val rStream = RedisStream.fromConnection(connection)
+    redisConnection().flatMap{connection =>
+
+      val rStream = RedisStream.fromConnection[IO](connection)
       rStream.append(messages) >>
       rStream.read(Set("foo")).take(1).compile.lastOrError
 
@@ -64,9 +65,9 @@ class RedisStreamSpec extends CatsEffectSuite {
       RedisStream.XAddMessage("fee", List("2" -> "2")),
       RedisStream.XAddMessage("fee", List("3" -> "3")),
     )
-    redisConnection().flatMap{connection => 
+    redisConnection().flatMap{connection =>
       
-      val rStream = RedisStream.fromConnection(connection)
+      val rStream = RedisStream.fromConnection[IO](connection)
       rStream.append(messages) >>
       rStream
         .read(Set("fee"), (_ => RedisCommands.StreamOffset.From("fee", "0-0")), Duration.Zero, 1L.some)
@@ -91,7 +92,7 @@ class RedisStreamSpec extends CatsEffectSuite {
     )
     redisConnection().flatMap{connection => 
       
-      val rStream = RedisStream.fromConnection(connection)
+      val rStream = RedisStream.fromConnection[IO](connection)
       rStream.append(messages) >>
       rStream
         .read(Set("baf", "baz", "bar"), stream => RedisCommands.StreamOffset.From(stream, "0"), Duration.Zero, 1L.some)
