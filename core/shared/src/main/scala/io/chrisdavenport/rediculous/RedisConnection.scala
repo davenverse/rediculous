@@ -20,6 +20,7 @@ import java.time.Instant
 import _root_.io.chrisdavenport.rediculous.cluster.ClusterCommands.ClusterSlots
 import fs2.io.net.SocketGroupCompanionPlatform
 import scodec.bits.ByteVector
+import fs2.io.net.Network
 
 trait RedisConnection[F[_]]{
   def runRequest(
@@ -129,7 +130,7 @@ object RedisConnection{
     val clusterCacheTopologySeconds: FiniteDuration = 1.second // How long topology will not be rechecked for after a succesful refresh
   }
 
-  def direct[F[_]: Async]: DirectConnectionBuilder[F] = 
+  def direct[F[_]: Async: Network]: DirectConnectionBuilder[F] =
     new DirectConnectionBuilder(
       Network[F],
       Defaults.host,
@@ -139,7 +140,10 @@ object RedisConnection{
       None
     )
 
-  class DirectConnectionBuilder[F[_]: Concurrent] private[RedisConnection](
+  private[rediculous] def direct[F[_]: Async]: DirectConnectionBuilder[F] =
+    direct(Async[F], Network[F])
+
+  class DirectConnectionBuilder[F[_]: Concurrent: Network] private[RedisConnection](
     private val sg: SocketGroup[F],
     val host: Host,
     val port: Port,
@@ -176,7 +180,12 @@ object RedisConnection{
     def build: Resource[F,RedisConnection[F]] = 
       for {
         socket <- sg.client(SocketAddress(host,port), Nil)
-        out <- elevateSocket(socket, tlsContext, tlsParameters)
+        tlsContextOptWithDefault <-
+          tlsContext
+            .fold(Network[F].tlsContext.systemResource.attempt.map(_.toOption))(
+              _.some.pure[Resource[F, *]]
+            )
+        out <- elevateSocket(socket, tlsContextOptWithDefault, tlsParameters)
         _ <- Resource.eval(auth match {
           case None => ().pure[F]
           case Some((Some(username), password)) =>
@@ -187,7 +196,7 @@ object RedisConnection{
       } yield RedisConnection.DirectConnection(out)
   }
 
-  def pool[F[_]: Async]: PooledConnectionBuilder[F] = 
+  def pool[F[_]: Async: Network]: PooledConnectionBuilder[F] =
     new PooledConnectionBuilder(
       Network[F],
       Defaults.host,
@@ -197,7 +206,10 @@ object RedisConnection{
       None
     )
 
-  class PooledConnectionBuilder[F[_]: Async] private[RedisConnection] (
+  private def pool[F[_]: Async]: PooledConnectionBuilder[F] =
+    pool(Async[F], Network[F])
+
+  class PooledConnectionBuilder[F[_]: Async: Network] private[RedisConnection] (
     private val sg: SocketGroup[F],
     val host: Host,
     val port: Port,
@@ -231,10 +243,15 @@ object RedisConnection{
     def withAuth(username: Option[String], password: String) = copy(auth = Some((username, password)))
     def withoutAuth = copy(auth = None)
 
-    def build: Resource[F,RedisConnection[F]] = 
-      KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
+    def build: Resource[F,RedisConnection[F]] = for {
+      tlsContextOptWithDefault <-
+        tlsContext
+          .fold(Network[F].tlsContext.systemResource.attempt.map(_.toOption))(
+            _.some.pure[Resource[F, *]]
+          )
+      kp <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
         {_ => sg.client(SocketAddress(host,port), Nil)
-          .flatMap(elevateSocket(_, tlsContext, tlsParameters))
+          .flatMap(elevateSocket(_, tlsContextOptWithDefault, tlsParameters))
           .evalTap(socket =>
             auth match {
               case None => ().pure[F]
@@ -247,11 +264,12 @@ object RedisConnection{
           .allocated
         },
         { case (_, shutdown) => shutdown}
-      ).build.map(PooledConnection[F](_))
+      ).build
+    } yield PooledConnection[F](kp)
 
   }
 
-  def queued[F[_]: Async]: QueuedConnectionBuilder[F] =
+  def queued[F[_]: Async: Network]: QueuedConnectionBuilder[F] =
     new QueuedConnectionBuilder(
       Network[F],
       Defaults.host,
@@ -263,6 +281,9 @@ object RedisConnection{
       Defaults.chunkSizeLimit,
       None
     )
+
+  private[rediculous] def queued[F[_]: Async]: QueuedConnectionBuilder[F] =
+    queued(Async[F], Network[F])
 
   class QueuedConnectionBuilder[F[_]: Async] private[RedisConnection](
     private val sg: SocketGroup[F],
@@ -314,9 +335,15 @@ object RedisConnection{
     def build: Resource[F,RedisConnection[F]] = {
       for {
         queue <- Resource.eval(Queue.bounded[F, Chunk[(Either[Throwable,Resp] => F[Unit], Resp)]](maxQueued))
+
+        tlsContextOptWithDefault <-
+          tlsContext
+            .fold(Network[F].tlsContext.systemResource.attempt.map(_.toOption))(
+              _.some.pure[Resource[F, *]]
+            )
         keypool <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
           {_ => sg.client(SocketAddress(host,port), Nil)
-            .flatMap(elevateSocket(_, tlsContext, tlsParameters))
+            .flatMap(elevateSocket(_, tlsContextOptWithDefault, tlsParameters))
             .evalTap(socket =>
               auth match {
                 case None => ().pure[F]
@@ -364,7 +391,7 @@ object RedisConnection{
     }
   }
 
-  def cluster[F[_]: Async]: ClusterConnectionBuilder[F] = 
+  def cluster[F[_]: Async: Network]: ClusterConnectionBuilder[F] =
     new ClusterConnectionBuilder(
       Network[F],
       Defaults.host,
@@ -379,6 +406,9 @@ object RedisConnection{
       Defaults.clusterCacheTopologySeconds,
       None
     )
+
+  private[rediculous] def cluster[F[_]: Async]: ClusterConnectionBuilder[F] =
+    cluster(Async[F], Network[F])
 
   class ClusterConnectionBuilder[F[_]: Async] private[RedisConnection] (
     private val sg: SocketGroup[F],
@@ -443,9 +473,14 @@ object RedisConnection{
 
     def build: Resource[F,RedisConnection[F]] = {
       for {
+        tlsContextOptWithDefault <-
+          tlsContext
+            .fold(Network[F].tlsContext.systemResource.attempt.map(_.toOption))(
+              _.some.pure[Resource[F, *]]
+            )
         keypool <- KeyPoolBuilder[F, (Host, Port), (Socket[F], F[Unit])](
           {(t: (Host, Port)) => sg.client(SocketAddress(host,port), Nil)
-              .flatMap(elevateSocket(_, tlsContext, tlsParameters))
+              .flatMap(elevateSocket(_, tlsContextOptWithDefault, tlsParameters))
               .evalTap(socket =>
                 auth match {
                   case None => ().pure[F]
