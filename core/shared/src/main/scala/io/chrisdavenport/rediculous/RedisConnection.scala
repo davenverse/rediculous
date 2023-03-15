@@ -35,7 +35,7 @@ object RedisConnection{
       chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map(d => (d, ({(e: Either[Throwable, Resp]) => d.complete(e).void}, resp)))).flatMap{ c => 
         queue.offer(c.map(_._2)) >> {
           val x: F[Chunk[Either[Throwable, Resp]]] = c.traverse{ case (d, _) => d.get }
-          val y: F[Chunk[Resp]] = x.flatMap(_.sequence.liftTo[F])
+          val y: F[Chunk[Resp]] = x.flatMap(_.sequence.liftTo[F].adaptError{case e => RedisError.QueuedExceptionError(e)})
           y
         }
       }
@@ -69,7 +69,7 @@ object RedisConnection{
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
       chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map(d => (d, ({(e: Either[Throwable, Resp]) => d.complete(e).void}, key, None, 0, resp)))).flatMap{ c => 
         queue.offer(c.map(_._2)) >> {
-          c.traverse(_._1.get).flatMap(_.sequence.liftTo[F])
+          c.traverse(_._1.get).flatMap(_.sequence.liftTo[F].adaptError{case e => RedisError.QueuedExceptionError(e)})
         }
       }   
     }
@@ -311,13 +311,13 @@ object RedisConnection{
                         }
                       case l@Left(_) => l.rightCast[Chunk[Resp]].pure[F]
                   }.flatMap{
-                    case Right(n) => 
+                    case Right(n) =>
                       n.zipWithIndex.traverse_{
                         case (ref, i) => 
                           val (toSet, _) = chunk(i)
                           toSet(Either.right(ref))
                       }
-                    case e@Left(_) => 
+                    case e@Left(_) =>
                       chunk.traverse_{ case (deff, _) => deff(e.asInstanceOf[Either[Throwable, Resp]])}
                   }) 
               } else {
