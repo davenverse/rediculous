@@ -18,4 +18,9 @@ object RedisError {
   final case class Generic(message: String) extends RedisError{
     val cause: Option[Throwable] = None
   }
+
+  final case class QueuedExceptionError(baseCase: Throwable) extends RedisError {
+    override val message: String = s"Error encountered in queue: ${baseCase.getMessage()}"
+    override val cause: Option[Throwable] = Some(baseCase)
+  }
 }
