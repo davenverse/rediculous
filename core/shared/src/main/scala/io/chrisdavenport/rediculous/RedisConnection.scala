@@ -20,6 +20,7 @@ import java.time.Instant
 import _root_.io.chrisdavenport.rediculous.cluster.ClusterCommands.ClusterSlots
 import fs2.io.net.SocketGroupCompanionPlatform
 import scodec.bits.ByteVector
+import fs2.io.net.Network
 
 trait RedisConnection[F[_]]{
   def runRequest(
@@ -127,27 +128,32 @@ object RedisConnection{
     val clusterParallelServerCalls: Int = Int.MaxValue // Number of calls for cluster to execute in parallel against multiple server in a batch
     val clusterUseDynamicRefreshSource: Boolean = true // Set to false to only use initially provided host for topology refresh
     val clusterCacheTopologySeconds: FiniteDuration = 1.second // How long topology will not be rechecked for after a succesful refresh
+    val useTLS: Boolean = false
   }
 
-  def direct[F[_]: Concurrent: Network]: DirectConnectionBuilder[F] =
+  def direct[F[_]: Temporal: Network]: DirectConnectionBuilder[F] =
     new DirectConnectionBuilder(
       Network[F],
       Defaults.host,
       Defaults.port,
       None,
-      TLSParameters.Default
+      TLSParameters.Default,
+      None,
+      Defaults.useTLS
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
   def direct[F[_]](F: Async[F]): DirectConnectionBuilder[F] =
     direct(F, Network.forAsync(F))
 
-  class DirectConnectionBuilder[F[_]: Concurrent] private[RedisConnection](
+  class DirectConnectionBuilder[F[_]: Temporal: Network] private[RedisConnection](
     private val sg: SocketGroup[F],
     val host: Host,
     val port: Port,
     private val tlsContext: Option[TLSContext[F]],
-    private val tlsParameters: TLSParameters 
+    private val tlsParameters: TLSParameters,
+    private val auth: Option[(Option[String], String)],
+    private val useTLS: Boolean,
   ) { self => 
 
     private def copy(
@@ -155,13 +161,17 @@ object RedisConnection{
       host: Host = self.host,
       port: Port = self.port,
       tlsContext: Option[TLSContext[F]] = self.tlsContext,
-      tlsParameters: TLSParameters = self.tlsParameters
+      tlsParameters: TLSParameters = self.tlsParameters,
+      auth: Option[(Option[String], String)] = self.auth,
+      useTLS: Boolean = self.useTLS
     ): DirectConnectionBuilder[F] = new DirectConnectionBuilder(
       sg,
       host,
       port,
       tlsContext,
-      tlsParameters
+      tlsParameters,
+      auth,
+      useTLS
     )
 
     def withHost(host: Host) = copy(host = host)
@@ -170,11 +180,27 @@ object RedisConnection{
     def withoutTLSContext = copy(tlsContext = None)
     def withTLSParameters(tlsParameters: TLSParameters) = copy(tlsParameters = tlsParameters)
     def withSocketGroup(sg: SocketGroup[F]) = copy(sg = sg)
+    def withAuth(username: Option[String], password: String) = copy(auth = Some((username, password)))
+    def withoutAuth = copy(auth = None)
+    def withTLS = copy(useTLS = true)
+    def withoutTLS = copy(useTLS = false)
 
     def build: Resource[F,RedisConnection[F]] = 
       for {
         socket <- sg.client(SocketAddress(host,port), Nil)
-        out <- elevateSocket(socket, tlsContext, tlsParameters)
+        tlsContextOptWithDefault <-
+          tlsContext
+            .fold(Network[F].tlsContext.systemResource.attempt.map(_.toOption))(
+              _.some.pure[Resource[F, *]]
+            )
+        out <- elevateSocket(socket, tlsContextOptWithDefault, tlsParameters, useTLS)
+        _ <- Resource.eval(auth match {
+          case None => ().pure[F]
+          case Some((Some(username), password)) =>
+            RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(out)).void
+          case Some((None, password)) =>
+            RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(out)).void
+        })
       } yield RedisConnection.DirectConnection(out)
   }
 
@@ -184,33 +210,41 @@ object RedisConnection{
       Defaults.host,
       Defaults.port,
       None,
-      TLSParameters.Default
+      TLSParameters.Default,
+      None,
+      Defaults.useTLS,
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
   def pool[F[_]](F: Async[F]): PooledConnectionBuilder[F] =
     pool(F, Network.forAsync(F))
 
-  class PooledConnectionBuilder[F[_]: Temporal] private[RedisConnection] (
+  class PooledConnectionBuilder[F[_]: Temporal: Network] private[RedisConnection] (
     private val sg: SocketGroup[F],
     val host: Host,
     val port: Port,
     private val tlsContext: Option[TLSContext[F]],
-    private val tlsParameters: TLSParameters 
-  ) { self => 
+    private val tlsParameters: TLSParameters,
+    private val auth: Option[(Option[String], String)],
+    private val useTLS: Boolean,
+  ) { self =>
 
     private def copy(
       sg: SocketGroup[F] = self.sg,
       host: Host = self.host,
       port: Port = self.port,
       tlsContext: Option[TLSContext[F]] = self.tlsContext,
-      tlsParameters: TLSParameters = self.tlsParameters
+      tlsParameters: TLSParameters = self.tlsParameters,
+      auth: Option[(Option[String], String)] = self.auth,
+      useTLS: Boolean = self.useTLS,
     ): PooledConnectionBuilder[F] = new PooledConnectionBuilder(
       sg,
       host,
       port,
       tlsContext,
-      tlsParameters
+      tlsParameters,
+      auth,
+      useTLS
     )
 
     def withHost(host: Host) = copy(host = host)
@@ -219,15 +253,35 @@ object RedisConnection{
     def withoutTLSContext = copy(tlsContext = None)
     def withTLSParameters(tlsParameters: TLSParameters) = copy(tlsParameters = tlsParameters)
     def withSocketGroup(sg: SocketGroup[F]) = copy(sg = sg)
+    def withAuth(username: Option[String], password: String) = copy(auth = Some((username, password)))
+    def withoutAuth = copy(auth = None)
+    def withTLS = copy(useTLS = true)
+    def withoutTLS = copy(useTLS = false)
 
-    def build: Resource[F,RedisConnection[F]] = 
-      KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
+    def build: Resource[F,RedisConnection[F]] = for {
+      tlsContextOptWithDefault <-
+        tlsContext
+          .fold(Network[F].tlsContext.systemResource.attempt.map(_.toOption))(
+            _.some.pure[Resource[F, *]]
+          )
+      kp <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
         {_ => sg.client(SocketAddress(host,port), Nil)
-          .flatMap(elevateSocket(_, tlsContext, tlsParameters))
+          .flatMap(elevateSocket(_, tlsContextOptWithDefault, tlsParameters, useTLS))
+          .evalTap(socket =>
+            auth match {
+              case None => ().pure[F]
+              case Some((Some(username), password)) =>
+                RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(socket)).void
+              case Some((None, password)) =>
+                RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(socket)).void
+            }
+          )
           .allocated
         },
         { case (_, shutdown) => shutdown}
-      ).build.map(PooledConnection[F](_))
+      ).build
+    } yield PooledConnection[F](kp)
+
   }
 
   def queued[F[_]: Temporal: Network]: QueuedConnectionBuilder[F] =
@@ -239,14 +293,16 @@ object RedisConnection{
       TLSParameters.Default,
       Defaults.maxQueued,
       Defaults.workers,
-      Defaults.chunkSizeLimit
+      Defaults.chunkSizeLimit,
+      None,
+      Defaults.useTLS,
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
   def queued[F[_]](F: Async[F]): QueuedConnectionBuilder[F] =
     queued(F, Network.forAsync(F))
 
-  class QueuedConnectionBuilder[F[_]: Temporal] private[RedisConnection](
+  class QueuedConnectionBuilder[F[_]: Temporal: Network] private[RedisConnection](
     private val sg: SocketGroup[F],
     val host: Host,
     val port: Port,
@@ -255,6 +311,8 @@ object RedisConnection{
     private val maxQueued: Int,
     private val workers: Int,
     private val chunkSizeLimit: Int,
+    private val auth: Option[(Option[String], String)],
+    private val useTLS: Boolean,
   ) { self => 
 
     private def copy(
@@ -266,6 +324,8 @@ object RedisConnection{
       maxQueued: Int = self.maxQueued,
       workers: Int = self.workers,
       chunkSizeLimit: Int = self.chunkSizeLimit,
+      auth: Option[(Option[String], String)] = self.auth,
+      useTLS: Boolean = self.useTLS,
     ): QueuedConnectionBuilder[F] = new QueuedConnectionBuilder(
       sg,
       host,
@@ -274,7 +334,9 @@ object RedisConnection{
       tlsParameters,
       maxQueued,
       workers,
-      chunkSizeLimit
+      chunkSizeLimit,
+      auth,
+      useTLS,
     )
 
     def withHost(host: Host) = copy(host = host)
@@ -287,13 +349,33 @@ object RedisConnection{
     def withMaxQueued(maxQueued: Int) = copy(maxQueued = maxQueued)
     def withWorkers(workers: Int) = copy(workers = workers)
     def withChunkSizeLimit(chunkSizeLimit: Int) = copy(chunkSizeLimit = chunkSizeLimit)
+    def withAuth(username: Option[String], password: String) = copy(auth = Some((username, password)))
+    def withoutAuth = copy(auth = None)
+
+    def withTLS = copy(useTLS = true)
+    def withoutTLS = copy(useTLS = false)
 
     def build: Resource[F,RedisConnection[F]] = {
       for {
         queue <- Resource.eval(Queue.bounded[F, Chunk[(Either[Throwable,Resp] => F[Unit], Resp)]](maxQueued))
+
+        tlsContextOptWithDefault <-
+          tlsContext
+            .fold(Network[F].tlsContext.systemResource.attempt.map(_.toOption))(
+              _.some.pure[Resource[F, *]]
+            )
         keypool <- KeyPoolBuilder[F, Unit, (Socket[F], F[Unit])](
           {_ => sg.client(SocketAddress(host,port), Nil)
-            .flatMap(elevateSocket(_, tlsContext, tlsParameters))
+            .flatMap(elevateSocket(_, tlsContextOptWithDefault, tlsParameters, useTLS))
+            .evalTap(socket =>
+              auth match {
+                case None => ().pure[F]
+                case Some((Some(username), password)) =>
+                  RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(socket)).void
+                case Some((None, password)) =>
+                  RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(socket)).void
+              }
+            )
             .allocated
           },
           { case (_, shutdown) => shutdown}
@@ -344,14 +426,16 @@ object RedisConnection{
       Defaults.chunkSizeLimit,
       Defaults.clusterParallelServerCalls,
       Defaults.clusterUseDynamicRefreshSource,
-      Defaults.clusterCacheTopologySeconds
+      Defaults.clusterCacheTopologySeconds,
+      None,
+      Defaults.useTLS,
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
   def cluster[F[_]](F: Async[F]): ClusterConnectionBuilder[F] =
     cluster(F, Network.forAsync(F))
 
-  class ClusterConnectionBuilder[F[_]: Async] private[RedisConnection] (
+  class ClusterConnectionBuilder[F[_]: Async: Network] private[RedisConnection] (
     private val sg: SocketGroup[F],
     val host: Host,
     val port: Port,
@@ -360,10 +444,12 @@ object RedisConnection{
     private val maxQueued: Int,
     private val workers: Int,
     private val chunkSizeLimit: Int,
-    private val parallelServerCalls: Int = Int.MaxValue,
-    private val useDynamicRefreshSource: Boolean = true, // Set to false to only use initially provided host for topology refresh
-    private val cacheTopologySeconds: FiniteDuration = 1.second, // How long topology will not be rechecked for after a succesful refresh
-  ) { self => 
+    private val parallelServerCalls: Int,
+    private val useDynamicRefreshSource: Boolean, // Set to false to only use initially provided host for topology refresh
+    private val cacheTopologySeconds: FiniteDuration, // How long topology will not be rechecked for after a succesful refresh
+    private val auth: Option[(Option[String], String)],
+    private val useTLS: Boolean,
+  ) { self =>
 
     private def copy(
       sg: SocketGroup[F] = self.sg,
@@ -376,7 +462,9 @@ object RedisConnection{
       chunkSizeLimit: Int = self.chunkSizeLimit,
       parallelServerCalls: Int = self.parallelServerCalls,
       useDynamicRefreshSource: Boolean = self.useDynamicRefreshSource,
-      cacheTopologySeconds: FiniteDuration = self.cacheTopologySeconds
+      cacheTopologySeconds: FiniteDuration = self.cacheTopologySeconds,
+      auth: Option[(Option[String], String)] = self.auth,
+      useTLS: Boolean = self.useTLS,
     ): ClusterConnectionBuilder[F] = new ClusterConnectionBuilder(
       sg,
       host,
@@ -388,7 +476,9 @@ object RedisConnection{
       chunkSizeLimit,
       parallelServerCalls,
       useDynamicRefreshSource,
-      cacheTopologySeconds
+      cacheTopologySeconds,
+      auth,
+      useTLS
     )
 
     def withHost(host: Host) = copy(host = host)
@@ -398,6 +488,9 @@ object RedisConnection{
     def withTLSParameters(tlsParameters: TLSParameters) = copy(tlsParameters = tlsParameters)
     def withSocketGroup(sg: SocketGroup[F]) = copy(sg = sg)
 
+    def withAuth(username: Option[String], password: String) = copy(auth = Some((username, password)))
+    def withoutAuth = copy(auth = None)
+
     def withMaxQueued(maxQueued: Int) = copy(maxQueued = maxQueued)
     def withWorkers(workers: Int) = copy(workers = workers)
     def withChunkSizeLimit(chunkSizeLimit: Int) = copy(chunkSizeLimit = chunkSizeLimit)
@@ -406,11 +499,28 @@ object RedisConnection{
     def withUseDynamicRefreshSource(useDynamicRefreshSource: Boolean) = copy(useDynamicRefreshSource = useDynamicRefreshSource)
     def withCacheTopologySeconds(cacheTopologySeconds: FiniteDuration) = copy(cacheTopologySeconds = cacheTopologySeconds)
 
+    def withTLS = copy(useTLS = true)
+    def withoutTLS = copy(useTLS = false)
+
     def build: Resource[F,RedisConnection[F]] = {
       for {
+        tlsContextOptWithDefault <-
+          tlsContext
+            .fold(Network[F].tlsContext.systemResource.attempt.map(_.toOption))(
+              _.some.pure[Resource[F, *]]
+            )
         keypool <- KeyPoolBuilder[F, (Host, Port), (Socket[F], F[Unit])](
           {(t: (Host, Port)) => sg.client(SocketAddress(host,port), Nil)
-              .flatMap(elevateSocket(_, tlsContext, tlsParameters))
+              .flatMap(elevateSocket(_, tlsContextOptWithDefault, tlsParameters, useTLS))
+              .evalTap(socket =>
+                auth match {
+                  case None => ().pure[F]
+                  case Some((Some(username), password)) =>
+                    RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(socket)).void
+                  case Some((None, password)) =>
+                    RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(socket)).void
+                }
+              )
               .allocated
           },
           { case (_, shutdown) => shutdown}
@@ -424,7 +534,7 @@ object RedisConnection{
         refreshTopology = refreshLock.permit.use(_ =>
           (
             refTopology.get
-              .flatMap{ case (topo, setAt) => 
+              .flatMap{ case (topo, setAt) =>
                 if (useDynamicRefreshSource) 
                   Applicative[F].pure((NonEmptyList((host, port), topo.l.flatMap(c => c.replicas).map(r => (r.host, r.port))), setAt))
                 else 
@@ -448,7 +558,7 @@ object RedisConnection{
             Stream.fromQueueUnterminatedChunk(queue, chunkSizeLimit).chunks.map{chunk =>
               val s = if (chunk.nonEmpty) {
                 Stream.eval(refTopology.get).map{ case (topo,_) => 
-                  Stream.eval(topo.random[F]).flatMap{ default => 
+                  Stream.eval(topo.random[F]).flatMap{ default =>
                   Stream.emits(
                       chunk.toList.groupBy{ case (_, s, server,_,_) => // TODO Investigate Efficient Group By
                       server.orElse(s.flatMap(key => topo.served(HashSlot.find(key)))).getOrElse(default) // Explicitly Set Server, Key Hashslot Server, or a default server if none selected.
@@ -517,8 +627,8 @@ object RedisConnection{
     }
   }
 
-  private def elevateSocket[F[_]](socket: Socket[F], tlsContext: Option[TLSContext[F]], tlsParameters: TLSParameters): Resource[F, Socket[F]] = 
-    tlsContext.fold(Resource.pure[F, Socket[F]](socket))(c => c.clientBuilder(socket).withParameters(tlsParameters).build)
+  private def elevateSocket[F[_]](socket: Socket[F], tlsContext: Option[TLSContext[F]], tlsParameters: TLSParameters, useTLS: Boolean): Resource[F, Socket[F]] =
+    tlsContext.fold(Resource.pure[F, Socket[F]](socket))(c => if (!useTLS) Resource.pure[F, Socket[F]](socket) else c.clientBuilder(socket).withParameters(tlsParameters).build)
 
   // ASK 1234-2020 127.0.0.1:6381
   // MOVED 1234-2020 127.0.0.1:6381
