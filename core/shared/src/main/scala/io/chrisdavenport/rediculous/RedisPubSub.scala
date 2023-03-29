@@ -236,7 +236,7 @@ object RedisPubSub {
         }
       }
     case RedisConnection.PooledConnection(pool) => 
-      pool.take(()).map(_.map(_._1)).flatMap{managed => 
+      pool.take(()).flatMap{managed =>
         val messagesR = Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())
         val onNonMessageR = Concurrent[F].ref((_: PubSubReply) => Applicative[F].unit)
         val onUnhandledMessageR = Concurrent[F].ref((_: PubSubMessage) => Applicative[F].unit)
