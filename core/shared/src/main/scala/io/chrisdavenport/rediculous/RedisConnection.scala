@@ -192,7 +192,7 @@ object RedisConnection{
     def withoutAuth = copy(auth = None)
     def withTLS = copy(useTLS = true)
     def withoutTLS = copy(useTLS = false)
-    def withTimeout(timeout: Duration) = copy(defaultTimeout = timeout)
+    def withRequestTimeout(timeout: Duration) = copy(defaultTimeout = timeout)
 
     def build: Resource[F,RedisConnection[F]] = 
       for {
@@ -270,7 +270,7 @@ object RedisConnection{
     def withoutAuth = copy(auth = None)
     def withTLS = copy(useTLS = true)
     def withoutTLS = copy(useTLS = false)
-    def withTimeout(timeout: Duration) = copy(defaultTimeout = timeout)
+    def withRequestTimeout(timeout: Duration) = copy(defaultTimeout = timeout)
 
     def build: Resource[F,RedisConnection[F]] = for {
       tlsContextOptWithDefault <-
@@ -370,7 +370,7 @@ object RedisConnection{
 
     def withTLS = copy(useTLS = true)
     def withoutTLS = copy(useTLS = false)
-    def withTimeout(timeout: Duration) = copy(defaultTimeout = timeout)
+    def withRequestTimeout(timeout: Duration) = copy(defaultTimeout = timeout)
 
     def build: Resource[F,RedisConnection[F]] = {
       for {
@@ -382,7 +382,7 @@ object RedisConnection{
               _.some.pure[Resource[F, *]]
             )
         keypool <- KeyPool.Builder.apply[F, Unit, Socket[F]](
-          {_ => sg.client(SocketAddress(host,port), Nil)
+          {(_: Unit) => sg.client(SocketAddress(host,port), Nil)
             .flatMap(elevateSocket(_, tlsContextOptWithDefault, tlsParameters, useTLS))
             .evalTap(socket =>
               auth match {
@@ -520,7 +520,7 @@ object RedisConnection{
 
     def withTLS = copy(useTLS = true)
     def withoutTLS = copy(useTLS = false)
-    def withTimeout(timeout: Duration) = copy(defaultTimeout = timeout)
+    def withRequestTimeout(timeout: Duration) = copy(defaultTimeout = timeout)
 
     def build: Resource[F,RedisConnection[F]] = {
       for {
@@ -530,7 +530,10 @@ object RedisConnection{
               _.some.pure[Resource[F, *]]
             )
         keypool <- KeyPool.Builder[F, (Host, Port), Socket[F]](
-          {case ((host: Host, port: Port)) => sg.client(SocketAddress(host, port), Nil)
+          {(t: (Host, Port)) =>
+            val host = t._1
+            val port = t._2
+            sg.client(SocketAddress(host, port), Nil)
               .flatMap(elevateSocket(_, tlsContextOptWithDefault, tlsParameters, useTLS))
               .evalTap(socket =>
                 auth match {
