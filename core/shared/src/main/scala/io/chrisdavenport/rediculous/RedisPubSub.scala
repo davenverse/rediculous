@@ -5,13 +5,10 @@ import fs2.io.net._
 import cats._
 import cats.syntax.all._
 import cats.effect._
-import cats.effect.syntax.all._
 import cats.data.NonEmptyList
-import scala.concurrent.duration._
 import _root_.io.chrisdavenport.rediculous.implicits._
 import org.typelevel.keypool.Reusable
 import scodec.bits._
-import java.nio.charset.StandardCharsets
 import RedisCtx.syntax.all._
 
 /**
@@ -64,9 +61,9 @@ object RedisPubSub {
       val emptyBV = ByteVector.empty
       val pongBV = ByteVector.encodeUtf8("pong").fold(throw _, identity)
       def decode(resp: Resp): Either[Resp,PubSubReply] = resp match {
-        case r@Resp.Array(Some(Resp.BulkString(Some(pong)) :: Resp.BulkString(Some(empty)) :: Nil)) if pong == pongBV && empty == emptyBV => 
+        case Resp.Array(Some(Resp.BulkString(Some(pong)) :: Resp.BulkString(Some(empty)) :: Nil)) if pong == pongBV && empty == emptyBV =>
           Pong.asRight
-        case r@Resp.Array(Some(r0 :: r1 :: r2 :: rs)) => 
+        case r@Resp.Array(Some(r0 :: r1 :: r2 :: rs)) =>
           r0.decode[String].flatMap{
             case "message" => 
               (r1.decode[String], r2.decode[String])
