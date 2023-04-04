@@ -1,12 +1,11 @@
 package io.chrisdavenport.rediculous
 
-import munit.CatsEffectSuite
 import cats.effect._
 import fs2.{Chunk, Pipe}
 import com.comcast.ip4s.{Host, Port,IpAddress, SocketAddress}
 import fs2.io.net.{Socket, SocketOption, SocketGroup}
 
-class RedisConnectionSpec extends CatsEffectSuite {
+class RedisConnectionSpec extends RediculousCrossSuite {
 
   test("Queued Connection Does Not Hang on EOF"){
     val fakeSocket = new fs2.io.net.Socket[IO]{
