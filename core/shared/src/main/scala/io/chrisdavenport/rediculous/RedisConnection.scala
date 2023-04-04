@@ -83,7 +83,6 @@ object RedisConnection{
     out.flatMap(socket.write) >>
     Stream.eval(socket.read(maxBytes))
       .repeat
-      .debug(c => c.map(_.toByteVector.decodeAsciiLenient).toString)
       .unNoneTerminate
       .unchunks
       .through(fs2.interop.scodec.StreamDecoder.many(Resp.CodecUtils.codec).toPipeByte)
@@ -409,10 +408,11 @@ object RedisConnection{
                       case l@Left(_) => l.rightCast[Chunk[Resp]].pure[F]
                   }.flatMap{
                     case Right(n) =>
-                      n.zipWithIndex.traverse_{
-                        case (ref, i) => 
-                          val (toSet, _) = chunk(i)
-                          toSet(Either.right(ref))
+                      chunk.zipWithIndex.traverse_{
+                        case ((toSet, _), i) =>
+                          val ref = Either.catchNonFatal(n(i))
+                            .leftMap(_ => RedisError.Generic("Rediculous: Queued Command did not get response, this likely indicates an EOF during a read")) // TODO should this be something more specific
+                          toSet(ref)
                       }
                     case e@Left(_) =>
                       chunk.traverse_{ case (deff, _) => deff(e.asInstanceOf[Either[Throwable, Resp]])}
