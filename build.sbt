@@ -62,6 +62,10 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     libraryDependencies ++= Seq(
       "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.8" % Test,
     )
+  ).platformsSettings(NativePlatform)(
+    libraryDependencies ++= Seq(
+      "com.armanbilge" %%% "epollcat" % "0.1.4"
+    )
   )
 
 lazy val examples = crossProject(JVMPlatform, JSPlatform)

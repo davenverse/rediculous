@@ -7,6 +7,7 @@ import com.comcast.ip4s.{Host, Port,IpAddress, SocketAddress}
 import fs2.io.net.{Socket, SocketOption, SocketGroup}
 
 class RedisConnectionSpec extends CatsEffectSuite {
+
   test("Queued Connection Does Not Hang on EOF"){
     val fakeSocket = new fs2.io.net.Socket[IO]{
       def read(maxBytes: Int): IO[Option[Chunk[Byte]]] = IO(None)
