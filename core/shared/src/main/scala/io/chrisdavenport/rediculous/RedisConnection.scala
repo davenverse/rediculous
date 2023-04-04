@@ -80,9 +80,14 @@ object RedisConnection{
     val out = calls.flatMap(resp =>
       Resp.CodecUtils.codec.encode(resp).toEither.traverse(bits => Chunk.byteVector(bits.bytes))
     ).sequence.leftMap(err => new Throwable(s"Failed To Encode Response $err")).liftTo[F]
-    out.flatMap(socket.write) >> 
-    Stream.eval(socket.read(maxBytes)).repeat.unNoneTerminate.unchunks.through(fs2.interop.scodec.StreamDecoder.many(Resp.CodecUtils.codec).toPipeByte)
-      .take(calls.size)
+    out.flatMap(socket.write) >>
+    Stream.eval(socket.read(maxBytes))
+      .repeat
+      .debug(c => c.map(_.toByteVector.decodeAsciiLenient).toString)
+      .unNoneTerminate
+      .unchunks
+      .through(fs2.interop.scodec.StreamDecoder.many(Resp.CodecUtils.codec).toPipeByte)
+      .take(calls.size.toLong)
       .compile
       .to(Chunk)
   }
@@ -102,7 +107,7 @@ object RedisConnection{
   def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[ByteVector], key: Option[ByteVector]): F[Either[Resp, A]] = 
     runRequestInternal(connection)(Chunk.singleton(input), key).flatMap(head[F]).map(resp => RedisResult[A].decode(resp))
 
-  def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[ByteVector], key: Option[ByteVector]): Redis[F, A] = Redis(Kleisli{(connection: RedisConnection[F]) => 
+  def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[ByteVector], key: Option[ByteVector]): Redis[F, A] = Redis(Kleisli{(connection: RedisConnection[F]) =>
     runRequest(connection)(input, key).flatMap{
       case Right(a) => a.pure[F]
       case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
@@ -127,6 +132,7 @@ object RedisConnection{
     val clusterUseDynamicRefreshSource: Boolean = true // Set to false to only use initially provided host for topology refresh
     val clusterCacheTopologySeconds: FiniteDuration = 1.second // How long topology will not be rechecked for after a succesful refresh
     val useTLS: Boolean = false
+    val requestTimeout: Duration = 60.seconds
   }
 
   def direct[F[_]: Temporal: Network]: DirectConnectionBuilder[F] =
@@ -137,7 +143,8 @@ object RedisConnection{
       None,
       TLSParameters.Default,
       None,
-      Defaults.useTLS
+      Defaults.useTLS,
+      Defaults.requestTimeout
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
@@ -152,6 +159,7 @@ object RedisConnection{
     private val tlsParameters: TLSParameters,
     private val auth: Option[(Option[String], String)],
     private val useTLS: Boolean,
+    private val defaultTimeout: Duration,
   ) { self => 
 
     private def copy(
@@ -161,7 +169,8 @@ object RedisConnection{
       tlsContext: Option[TLSContext[F]] = self.tlsContext,
       tlsParameters: TLSParameters = self.tlsParameters,
       auth: Option[(Option[String], String)] = self.auth,
-      useTLS: Boolean = self.useTLS
+      useTLS: Boolean = self.useTLS,
+      defaultTimeout: Duration = self.defaultTimeout
     ): DirectConnectionBuilder[F] = new DirectConnectionBuilder(
       sg,
       host,
@@ -169,7 +178,8 @@ object RedisConnection{
       tlsContext,
       tlsParameters,
       auth,
-      useTLS
+      useTLS,
+      defaultTimeout
     )
 
     def withHost(host: Host) = copy(host = host)
@@ -182,6 +192,7 @@ object RedisConnection{
     def withoutAuth = copy(auth = None)
     def withTLS = copy(useTLS = true)
     def withoutTLS = copy(useTLS = false)
+    def withRequestTimeout(timeout: Duration) = copy(defaultTimeout = timeout)
 
     def build: Resource[F,RedisConnection[F]] = 
       for {
@@ -199,7 +210,7 @@ object RedisConnection{
           case Some((None, password)) =>
             RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(out)).void
         })
-      } yield RedisConnection.DirectConnection(out)
+      } yield new TimeoutConnection(RedisConnection.DirectConnection(out), defaultTimeout)
   }
 
   def pool[F[_]: Temporal: Network]: PooledConnectionBuilder[F] =
@@ -211,6 +222,7 @@ object RedisConnection{
       TLSParameters.Default,
       None,
       Defaults.useTLS,
+      Defaults.requestTimeout,
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
@@ -225,6 +237,7 @@ object RedisConnection{
     private val tlsParameters: TLSParameters,
     private val auth: Option[(Option[String], String)],
     private val useTLS: Boolean,
+    private val defaultTimeout: Duration,
   ) { self =>
 
     private def copy(
@@ -235,6 +248,7 @@ object RedisConnection{
       tlsParameters: TLSParameters = self.tlsParameters,
       auth: Option[(Option[String], String)] = self.auth,
       useTLS: Boolean = self.useTLS,
+      defaultTimeout: Duration = self.defaultTimeout,
     ): PooledConnectionBuilder[F] = new PooledConnectionBuilder(
       sg,
       host,
@@ -242,7 +256,8 @@ object RedisConnection{
       tlsContext,
       tlsParameters,
       auth,
-      useTLS
+      useTLS,
+      defaultTimeout
     )
 
     def withHost(host: Host) = copy(host = host)
@@ -255,6 +270,7 @@ object RedisConnection{
     def withoutAuth = copy(auth = None)
     def withTLS = copy(useTLS = true)
     def withoutTLS = copy(useTLS = false)
+    def withRequestTimeout(timeout: Duration) = copy(defaultTimeout = timeout)
 
     def build: Resource[F,RedisConnection[F]] = for {
       tlsContextOptWithDefault <-
@@ -263,7 +279,7 @@ object RedisConnection{
             _.some.pure[Resource[F, *]]
           )
       kp <- KeyPool.Builder[F, Unit, Socket[F]](
-        {_ => sg.client(SocketAddress(host,port), Nil)
+        {(_: Unit) => sg.client(SocketAddress(host,port), Nil)
           .flatMap(elevateSocket(_, tlsContextOptWithDefault, tlsParameters, useTLS))
           .evalTap(socket =>
             auth match {
@@ -276,7 +292,7 @@ object RedisConnection{
           )
         }
       ).build
-    } yield PooledConnection[F](kp)
+    } yield new TimeoutConnection(PooledConnection[F](kp), defaultTimeout)
 
   }
 
@@ -292,6 +308,7 @@ object RedisConnection{
       Defaults.chunkSizeLimit,
       None,
       Defaults.useTLS,
+      Defaults.requestTimeout,
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
@@ -309,6 +326,7 @@ object RedisConnection{
     private val chunkSizeLimit: Int,
     private val auth: Option[(Option[String], String)],
     private val useTLS: Boolean,
+    private val defaultTimeout: Duration,
   ) { self => 
 
     private def copy(
@@ -322,6 +340,7 @@ object RedisConnection{
       chunkSizeLimit: Int = self.chunkSizeLimit,
       auth: Option[(Option[String], String)] = self.auth,
       useTLS: Boolean = self.useTLS,
+      defaultTimeout: Duration = self.defaultTimeout
     ): QueuedConnectionBuilder[F] = new QueuedConnectionBuilder(
       sg,
       host,
@@ -333,6 +352,7 @@ object RedisConnection{
       chunkSizeLimit,
       auth,
       useTLS,
+      defaultTimeout,
     )
 
     def withHost(host: Host) = copy(host = host)
@@ -350,6 +370,7 @@ object RedisConnection{
 
     def withTLS = copy(useTLS = true)
     def withoutTLS = copy(useTLS = false)
+    def withRequestTimeout(timeout: Duration) = copy(defaultTimeout = timeout)
 
     def build: Resource[F,RedisConnection[F]] = {
       for {
@@ -361,7 +382,7 @@ object RedisConnection{
               _.some.pure[Resource[F, *]]
             )
         keypool <- KeyPool.Builder.apply[F, Unit, Socket[F]](
-          {_ => sg.client(SocketAddress(host,port), Nil)
+          {(_: Unit) => sg.client(SocketAddress(host,port), Nil)
             .flatMap(elevateSocket(_, tlsContextOptWithDefault, tlsParameters, useTLS))
             .evalTap(socket =>
               auth match {
@@ -374,7 +395,7 @@ object RedisConnection{
             )
           }
         ).build
-        _ <- 
+        _ <-
             Stream.fromQueueUnterminatedChunk(queue, chunkSizeLimit).chunks.map{chunk =>
               val s = if (chunk.nonEmpty) {
                   Stream.eval(
@@ -404,7 +425,7 @@ object RedisConnection{
             .compile
             .drain
             .background
-      } yield Queued(queue, keypool.take(()))
+      } yield new TimeoutConnection(Queued(queue, keypool.take(())), defaultTimeout)
     }
   }
 
@@ -423,6 +444,7 @@ object RedisConnection{
       Defaults.clusterCacheTopologySeconds,
       None,
       Defaults.useTLS,
+      Defaults.requestTimeout,
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
@@ -443,6 +465,7 @@ object RedisConnection{
     private val cacheTopologySeconds: FiniteDuration, // How long topology will not be rechecked for after a succesful refresh
     private val auth: Option[(Option[String], String)],
     private val useTLS: Boolean,
+    private val defaultTimeout: Duration,
   ) { self =>
 
     private def copy(
@@ -459,6 +482,7 @@ object RedisConnection{
       cacheTopologySeconds: FiniteDuration = self.cacheTopologySeconds,
       auth: Option[(Option[String], String)] = self.auth,
       useTLS: Boolean = self.useTLS,
+      defaultTimeout: Duration = self.defaultTimeout
     ): ClusterConnectionBuilder[F] = new ClusterConnectionBuilder(
       sg,
       host,
@@ -472,7 +496,8 @@ object RedisConnection{
       useDynamicRefreshSource,
       cacheTopologySeconds,
       auth,
-      useTLS
+      useTLS,
+      defaultTimeout,
     )
 
     def withHost(host: Host) = copy(host = host)
@@ -495,6 +520,7 @@ object RedisConnection{
 
     def withTLS = copy(useTLS = true)
     def withoutTLS = copy(useTLS = false)
+    def withRequestTimeout(timeout: Duration) = copy(defaultTimeout = timeout)
 
     def build: Resource[F,RedisConnection[F]] = {
       for {
@@ -504,7 +530,10 @@ object RedisConnection{
               _.some.pure[Resource[F, *]]
             )
         keypool <- KeyPool.Builder[F, (Host, Port), Socket[F]](
-          {case ((host: Host, port: Port)) => sg.client(SocketAddress(host, port), Nil)
+          {(t: (Host, Port)) =>
+            val host = t._1
+            val port = t._2
+            sg.client(SocketAddress(host, port), Nil)
               .flatMap(elevateSocket(_, tlsContextOptWithDefault, tlsParameters, useTLS))
               .evalTap(socket =>
                 auth match {
@@ -615,7 +644,7 @@ object RedisConnection{
               .compile
               .drain
               .background
-      } yield cluster
+      } yield new TimeoutConnection(cluster, defaultTimeout)
     }
   }
 
@@ -640,4 +669,11 @@ object RedisConnection{
 
   private def raceNThrowFirst[F[_]: Concurrent, A](nel: NonEmptyList[F[A]]): F[A] = 
     Stream(Stream.emits(nel.toList).evalMap(identity)).covary[F].parJoinUnbounded.take(1).compile.lastOrError
+
+  private class TimeoutConnection[F[_]: Temporal](rC: RedisConnection[F], duration: Duration) extends RedisConnection[F] {
+
+    def runRequest(inputs: Chunk[NonEmptyList[ByteVector]], key: Option[ByteVector]): F[Chunk[Resp]] =
+      rC.runRequest(inputs, key).timeout(duration)
+
+  }
 }
