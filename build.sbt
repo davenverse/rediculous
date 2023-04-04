@@ -62,10 +62,14 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     libraryDependencies ++= Seq(
       "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.8" % Test,
     )
-  ).platformsSettings(NativePlatform)(
+  )
+  .nativeEnablePlugins(ScalaNativeBrewedConfigPlugin)
+  .platformsSettings(NativePlatform)(
     libraryDependencies ++= Seq(
       "com.armanbilge" %%% "epollcat" % "0.1.4" % Test
-    )
+    ),
+    Test / nativeBrewFormulas ++= Set("s2n", "utf8proc"),
+    Test / envVars ++= Map("S2N_DONT_MLOCK" -> "1")
   )
 
 lazy val examples = crossProject(JVMPlatform, JSPlatform)
