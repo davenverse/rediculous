@@ -64,7 +64,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     )
   ).platformsSettings(NativePlatform)(
     libraryDependencies ++= Seq(
-      "com.armanbilge" %%% "epollcat" % "0.1.4"
+      "com.armanbilge" %%% "epollcat" % "0.1.4" % Test
     )
   )
 
