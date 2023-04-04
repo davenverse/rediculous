@@ -589,14 +589,14 @@ object RedisConnection{
                       keypool.take(server).attempt.use{
                         case Right(m) =>
                           val out = Chunk.seq(rest.map(_._5))
-                          explicitPipelineRequest(m.value, out).map(c => (c, rest)).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
+                          explicitPipelineRequest(m.value, out).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
                             case Left(_) => m.canBeReused.set(Reusable.DontReuse)
                             case _ => Applicative[F].unit
                           }
-                        case l@Left(_) => l.rightCast[(Chunk[Resp], List[((Either[Throwable, Resp]) => F[Unit], Option[ByteVector], Option[(Host,Port)], Int, Resp)])].pure[F]
+                        case l@Left(_) => l.rightCast[Chunk[Resp]].pure[F]
                       }.flatMap{
-                      case Right((n, thisChunk)) =>
-                        thisChunk.zipWithIndex.traverse_{
+                      case Right(n) =>
+                        rest.zipWithIndex.traverse_{
                           case ((toSet, key, _, retries, initialCommand), i) =>
                             val ref = Either.catchNonFatal(n(i))
                             ref match {
