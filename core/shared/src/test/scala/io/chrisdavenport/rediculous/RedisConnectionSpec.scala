@@ -43,6 +43,6 @@ class RedisConnectionSpec extends CatsEffectSuite {
     RedisConnection.queued[IO].withSocketGroup(sg).build
       .use(c =>
         RedisCommands.ping[RedisIO].run(c)
-      ).intercept[RedisError.QueuedExceptionError] // We catch the redis error from the empty returned chunk
+      ).intercept[RedisError.QueuedExceptionError] // We catch the redis error from the empty returned chunk, previously to #69 this would hang.
   }
 }
