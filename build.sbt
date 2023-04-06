@@ -13,6 +13,8 @@ ThisBuild / tlCiReleaseBranches := Seq("main")
 // true by default, set to false to publish to s01.oss.sonatype.org
 ThisBuild / tlSonatypeUseLegacyHost := true
 
+ThisBuild / githubWorkflowBuildPreamble ++= nativeBrewInstallWorkflowSteps.value
+
 
 val catsV = "2.9.0"
 val catsEffectV = "3.4.8"
@@ -62,6 +64,14 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     libraryDependencies ++= Seq(
       "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.8" % Test,
     )
+  )
+  .nativeEnablePlugins(ScalaNativeBrewedConfigPlugin)
+  .platformsSettings(NativePlatform)(
+    libraryDependencies ++= Seq(
+      "com.armanbilge" %%% "epollcat" % "0.1.4" % Test
+    ),
+    Test / nativeBrewFormulas ++= Set("s2n", "utf8proc"),
+    Test / envVars ++= Map("S2N_DONT_MLOCK" -> "1")
   )
 
 lazy val examples = crossProject(JVMPlatform, JSPlatform)
