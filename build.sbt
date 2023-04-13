@@ -86,7 +86,7 @@ lazy val examples = crossProject(JVMPlatform, JSPlatform)
     scalaJSUseMainModuleInitializer := true,
   ).jsSettings(
     libraryDependencies ++= Seq(
-      "io.github.cquiroz" %%% "scala-java-time" % "2.4.0"
+      "io.github.cquiroz" %%% "scala-java-time" % "2.5.0"
     ),
     Compile / mainClass := Some("BasicExample"),
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)},
