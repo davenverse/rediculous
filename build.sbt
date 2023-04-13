@@ -52,7 +52,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
 
       "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.3.2" % Test,
       "org.typelevel"               %%% "munit-cats-effect"          % munitCatsEffectV         % Test,
-      "org.scalameta"               %%% "munit-scalacheck"            % "1.0.0-M6" % Test,
+      "org.scalameta"               %%% "munit-scalacheck"            % "1.0.0-M7" % Test,
     ),
     libraryDependencies += "org.scodec" %%% "scodec-core" % (if (scalaVersion.value.startsWith("2.")) "1.11.10" else "2.2.0")
   ).jsSettings(
