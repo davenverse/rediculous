@@ -1,4 +1,4 @@
-# rediculous - Pure FP Redis Client [![Build Status](https://travis-ci.com/ChristopherDavenport/rediculous.svg?branch=master)](https://travis-ci.com/ChristopherDavenport/rediculous) [![Maven Central](https://maven-badges.herokuapp.com/maven-central/io.chrisdavenport/rediculous_2.13/badge.svg)](https://maven-badges.herokuapp.com/maven-central/io.chrisdavenport/rediculous_2.13) ![Code of Consuct](https://img.shields.io/badge/Code%20of%20Conduct-Scala-blue.svg)
+# rediculous - Pure FP Redis Client [![Maven Central](https://maven-badges.herokuapp.com/maven-central/io.chrisdavenport/rediculous_2.13/badge.svg)](https://maven-badges.herokuapp.com/maven-central/io.chrisdavenport/rediculous_2.13) ![Code of Consuct](https://img.shields.io/badge/Code%20of%20Conduct-Scala-blue.svg)
 
 ## [Head on over to the microsite](https://davenverse.github.io/rediculous)
 
