@@ -18,8 +18,8 @@ libraryDependencies ++= Seq(
 import io.chrisdavenport.rediculous._
 import cats.syntax.all._
 import cats.effect._
+import cats.effect.std.Console
 import fs2.io.net._
-import java.net.InetSocketAddress
 import fs2._
 import scala.concurrent.duration._
 import com.comcast.ip4s._
@@ -57,7 +57,7 @@ object BasicExample extends IOApp {
         }
       }
 
-      val now = IO(java.time.Instant.now)
+      val now = Clock[IO].realTimeInstant
       (
         now,
         Stream(())
@@ -72,7 +72,7 @@ object BasicExample extends IOApp {
       ).mapN { case (before, _, after) =>
         (after.toEpochMilli() - before.toEpochMilli()).millis
       }.flatMap { duration =>
-        IO(println(s"Operation took ${duration}"))
+        Console[IO].println(s"Operation took ${duration}")
       }
     }.as(ExitCode.Success)
   }
