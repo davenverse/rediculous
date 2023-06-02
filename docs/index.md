@@ -14,7 +14,7 @@ libraryDependencies ++= Seq(
 ```
 
 
-```scala
+```scala mdoc
 import io.chrisdavenport.rediculous._
 import cats.syntax.all._
 import cats.effect._
