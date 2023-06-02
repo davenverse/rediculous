@@ -97,12 +97,13 @@
   </span><span class="string-literal">&quot;io.chrisdavenport&quot;</span><span> %% </span><span class="string-literal">&quot;rediculous&quot;</span><span> % </span><span class="string-literal">&quot;&lt;version&gt;&quot;</span><span>
 )</span></code></pre>
         <pre><code class="nohighlight"><span class="keyword">import</span><span> </span><span class="identifier">io</span><span>.</span><span class="identifier">chrisdavenport</span><span>.</span><span class="identifier">rediculous</span><span>.</span><span class="identifier">_</span><span>
-</span><span class="keyword">import</span><span> </span><span class="identifier">cats</span><span>.</span><span class="identifier">implicits</span><span>.</span><span class="identifier">_</span><span>
+</span><span class="keyword">import</span><span> </span><span class="identifier">cats</span><span>.</span><span class="identifier">syntax</span><span>.</span><span class="identifier">all</span><span>.</span><span class="identifier">_</span><span>
 </span><span class="keyword">import</span><span> </span><span class="identifier">cats</span><span>.</span><span class="identifier">effect</span><span>.</span><span class="identifier">_</span><span>
-</span><span class="keyword">import</span><span> </span><span class="identifier">fs2</span><span>.</span><span class="identifier">io</span><span>.</span><span class="identifier">tcp</span><span>.</span><span class="identifier">_</span><span>
-</span><span class="keyword">import</span><span> </span><span class="identifier">java</span><span>.</span><span class="identifier">net</span><span>.</span><span class="type-name">InetSocketAddress</span><span>
+</span><span class="keyword">import</span><span> </span><span class="identifier">cats</span><span>.</span><span class="identifier">effect</span><span>.</span><span class="identifier">std</span><span>.</span><span class="type-name">Console</span><span>
+</span><span class="keyword">import</span><span> </span><span class="identifier">fs2</span><span>.</span><span class="identifier">io</span><span>.</span><span class="identifier">net</span><span>.</span><span class="identifier">_</span><span>
 </span><span class="keyword">import</span><span> </span><span class="identifier">fs2</span><span>.</span><span class="identifier">_</span><span>
 </span><span class="keyword">import</span><span> </span><span class="identifier">scala</span><span>.</span><span class="identifier">concurrent</span><span>.</span><span class="identifier">duration</span><span>.</span><span class="identifier">_</span><span>
+</span><span class="keyword">import</span><span> </span><span class="identifier">com</span><span>.</span><span class="identifier">comcast</span><span>.</span><span class="identifier">ip4s</span><span>.</span><span class="identifier">_</span><span>
 
 </span><span class="comment">// Mimics 150 req/s load with 4 operations per request.
 // Completes 1,000,000 redis operations
@@ -111,15 +112,19 @@
 
   </span><span class="keyword">def</span><span> </span><span class="declaration-name">run</span><span>(</span><span class="identifier">args</span><span>: </span><span class="type-name">List</span><span>[</span><span class="type-name">String</span><span>]): </span><span class="type-name">IO</span><span>[</span><span class="type-name">ExitCode</span><span>] = {
     </span><span class="keyword">val</span><span> </span><span class="identifier">r</span><span> = </span><span class="keyword">for</span><span> {
-      </span><span class="identifier">blocker</span><span> &lt;- </span><span class="type-name">Blocker</span><span>[</span><span class="type-name">IO</span><span>]
-      </span><span class="identifier">sg</span><span> &lt;- </span><span class="type-name">SocketGroup</span><span>[</span><span class="type-name">IO</span><span>](</span><span class="identifier">blocker</span><span>)
-      </span><span class="comment">// maxQueued: How many elements before new submissions semantically block. Tradeoff of memory to queue jobs. 
+      </span><span class="comment">// maxQueued: How many elements before new submissions semantically block. Tradeoff of memory to queue jobs.
 </span><span>      </span><span class="comment">// Default 1000 is good for small servers. But can easily take 100,000.
 </span><span>      </span><span class="comment">// workers: How many threads will process pipelined messages.
-</span><span>      </span><span class="identifier">connection</span><span> &lt;- </span><span class="type-name">RedisConnection</span><span>.</span><span class="identifier">queued</span><span>[</span><span class="type-name">IO</span><span>](</span><span class="identifier">sg</span><span>, </span><span class="string-literal">&quot;localhost&quot;</span><span>, </span><span class="number-literal">6379</span><span>, </span><span class="identifier">maxQueued</span><span> = </span><span class="number-literal">10000</span><span>, </span><span class="identifier">workers</span><span> = </span><span class="number-literal">2</span><span>)
+</span><span>      </span><span class="identifier">connection</span><span> &lt;- </span><span class="type-name">RedisConnection</span><span>
+        .</span><span class="identifier">queued</span><span>[</span><span class="type-name">IO</span><span>]
+        .</span><span class="identifier">withHost</span><span>(</span><span class="type-name">Host</span><span>.</span><span class="identifier">fromString</span><span>(</span><span class="string-literal">&quot;localhost&quot;</span><span>).</span><span class="identifier">get</span><span>)
+        .</span><span class="identifier">withPort</span><span>(</span><span class="string-literal">port&quot;6379&quot;</span><span>)
+        .</span><span class="identifier">withMaxQueued</span><span>(</span><span class="number-literal">10000</span><span>)
+        .</span><span class="identifier">withWorkers</span><span>(</span><span class="number-literal">2</span><span>)
+        .</span><span class="identifier">build</span><span>
     } </span><span class="keyword">yield</span><span> </span><span class="identifier">connection</span><span>
 
-    </span><span class="identifier">r</span><span>.</span><span class="identifier">use</span><span> {</span><span class="identifier">client</span><span> =&gt;
+    </span><span class="identifier">r</span><span>.</span><span class="identifier">use</span><span> { </span><span class="identifier">client</span><span> =&gt;
       </span><span class="keyword">val</span><span> </span><span class="identifier">r</span><span> = (
         </span><span class="type-name">RedisCommands</span><span>.</span><span class="identifier">ping</span><span>[</span><span class="type-name">Redis</span><span>[</span><span class="type-name">IO</span><span>, *]],
         </span><span class="type-name">RedisCommands</span><span>.</span><span class="identifier">get</span><span>[</span><span class="type-name">Redis</span><span>[</span><span class="type-name">IO</span><span>, *]](</span><span class="string-literal">&quot;foo&quot;</span><span>),
@@ -127,25 +132,31 @@
         </span><span class="type-name">RedisCommands</span><span>.</span><span class="identifier">get</span><span>[</span><span class="type-name">Redis</span><span>[</span><span class="type-name">IO</span><span>, *]](</span><span class="string-literal">&quot;foo&quot;</span><span>)
       ).</span><span class="identifier">parTupled</span><span>
 
-      </span><span class="keyword">val</span><span> </span><span class="identifier">r2</span><span>= </span><span class="type-name">List</span><span>.</span><span class="identifier">fill</span><span>(</span><span class="number-literal">10</span><span>)(</span><span class="identifier">r</span><span>.</span><span class="identifier">run</span><span>(</span><span class="identifier">client</span><span>)).</span><span class="identifier">parSequence</span><span>.</span><span class="identifier">map</span><span>{</span><span class="identifier">_</span><span>.</span><span class="identifier">flatMap</span><span>{
-        </span><span class="keyword">case</span><span> (</span><span class="identifier">_</span><span>,</span><span class="identifier">_</span><span>,</span><span class="identifier">_</span><span>,</span><span class="identifier">_</span><span>) =&gt; </span><span class="type-name">List</span><span>((), (), (), ())
-      }}
+      </span><span class="keyword">val</span><span> </span><span class="identifier">r2</span><span> = </span><span class="type-name">List</span><span>.</span><span class="identifier">fill</span><span>(</span><span class="number-literal">10</span><span>)(</span><span class="identifier">r</span><span>.</span><span class="identifier">run</span><span>(</span><span class="identifier">client</span><span>)).</span><span class="identifier">parSequence</span><span>.</span><span class="identifier">map</span><span> {
+        </span><span class="identifier">_</span><span>.</span><span class="identifier">flatMap</span><span> { </span><span class="keyword">case</span><span> (</span><span class="identifier">_</span><span>, </span><span class="identifier">_</span><span>, </span><span class="identifier">_</span><span>, </span><span class="identifier">_</span><span>) =&gt;
+          </span><span class="type-name">List</span><span>((), (), (), ())
+        }
+      }
 
-      </span><span class="keyword">val</span><span> </span><span class="identifier">now</span><span> = </span><span class="type-name">IO</span><span>(</span><span class="identifier">java</span><span>.</span><span class="identifier">time</span><span>.</span><span class="type-name">Instant</span><span>.</span><span class="identifier">now</span><span>)
+      </span><span class="keyword">val</span><span> </span><span class="identifier">now</span><span> = </span><span class="type-name">Clock</span><span>[</span><span class="type-name">IO</span><span>].</span><span class="identifier">realTimeInstant</span><span>
       (
         </span><span class="identifier">now</span><span>,
-        </span><span class="type-name">Stream</span><span>(()).</span><span class="identifier">covary</span><span>[</span><span class="type-name">IO</span><span>].</span><span class="identifier">repeat</span><span>.</span><span class="identifier">map</span><span>(</span><span class="identifier">_</span><span> =&gt; </span><span class="type-name">Stream</span><span>.</span><span class="identifier">evalSeq</span><span>(</span><span class="identifier">r2</span><span>)).</span><span class="identifier">parJoin</span><span>(</span><span class="number-literal">15</span><span>).</span><span class="identifier">take</span><span>(</span><span class="number-literal">1000000</span><span>).</span><span class="identifier">compile</span><span>.</span><span class="identifier">drain</span><span>,
+        </span><span class="type-name">Stream</span><span>(())
+          .</span><span class="identifier">covary</span><span>[</span><span class="type-name">IO</span><span>]
+          .</span><span class="identifier">repeat</span><span>
+          .</span><span class="identifier">map</span><span>(</span><span class="identifier">_</span><span> =&gt; </span><span class="type-name">Stream</span><span>.</span><span class="identifier">evalSeq</span><span>(</span><span class="identifier">r2</span><span>))
+          .</span><span class="identifier">parJoin</span><span>(</span><span class="number-literal">15</span><span>)
+          .</span><span class="identifier">take</span><span>(</span><span class="number-literal">1000000</span><span>)
+          .</span><span class="identifier">compile</span><span>
+          .</span><span class="identifier">drain</span><span>,
         </span><span class="identifier">now</span><span>
-      ).</span><span class="identifier">mapN</span><span>{
-        </span><span class="keyword">case</span><span> (</span><span class="identifier">before</span><span>, </span><span class="identifier">_</span><span>, </span><span class="identifier">after</span><span>) =&gt; (</span><span class="identifier">after</span><span>.</span><span class="identifier">toEpochMilli</span><span>() - </span><span class="identifier">before</span><span>.</span><span class="identifier">toEpochMilli</span><span>()).</span><span class="identifier">millis</span><span>
-      }.</span><span class="identifier">flatMap</span><span>{ </span><span class="identifier">duration</span><span> =&gt; 
-        </span><span class="type-name">IO</span><span>(</span><span class="identifier">println</span><span>(</span><span class="string-literal">s&quot;Operation took </span><span class="substitution">${duration}</span><span class="string-literal">&quot;</span><span>))
+      ).</span><span class="identifier">mapN</span><span> { </span><span class="keyword">case</span><span> (</span><span class="identifier">before</span><span>, </span><span class="identifier">_</span><span>, </span><span class="identifier">after</span><span>) =&gt;
+        (</span><span class="identifier">after</span><span>.</span><span class="identifier">toEpochMilli</span><span>() - </span><span class="identifier">before</span><span>.</span><span class="identifier">toEpochMilli</span><span>()).</span><span class="identifier">millis</span><span>
+      }.</span><span class="identifier">flatMap</span><span> { </span><span class="identifier">duration</span><span> =&gt;
+        </span><span class="type-name">Console</span><span>[</span><span class="type-name">IO</span><span>].</span><span class="identifier">println</span><span>(</span><span class="string-literal">s&quot;Operation took </span><span class="substitution">${duration}</span><span class="string-literal">&quot;</span><span>)
       }
-    } &gt;&gt;
-      </span><span class="type-name">IO</span><span>.</span><span class="identifier">pure</span><span>(</span><span class="type-name">ExitCode</span><span>.</span><span class="type-name">Success</span><span>)
-    
+    }.</span><span class="identifier">as</span><span>(</span><span class="type-name">ExitCode</span><span>.</span><span class="type-name">Success</span><span>)
   }
-
 }</span></code></pre>
 
         <hr style="margin-top: 30px"/>
