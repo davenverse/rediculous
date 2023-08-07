@@ -1,7 +1,7 @@
 package io.chrisdavenport.rediculous
 
 import cats._
-import cats.implicits._
+import cats.syntax.all._
 import scodec.bits.ByteVector
 
 trait RedisResult[+A]{
@@ -125,17 +125,19 @@ object RedisResult extends RedisResultLowPriority{
   implicit def kv[K: RedisResult, V: RedisResult]: RedisResult[List[(K, V)]] = 
     new RedisResult[List[(K, V)]] {
       def decode(resp: Resp): Either[Resp,List[(K, V)]] = {
-        def pairs(l: List[Resp]): Either[Resp, List[(K, V)]] = l match {
-          case Nil => Nil.asRight
-          case _ :: Nil => Left(resp)
-          case x1 :: x2 :: xs => for {
-            k <- RedisResult[K].decode(x1)
-            v <- RedisResult[V].decode(x2)
-            kvs <- pairs(xs)
-          } yield (k, v) :: kvs
+        def pairs(l: List[Resp]): Eval[Either[Resp, List[(K, V)]]] = l match {
+          case Nil => Eval.now(Nil.asRight: Either[Resp, List[(K, V)]])
+          case _ :: Nil => Eval.now(Left(resp): Either[Resp, List[(K, V)]])
+          case x1 :: x2 :: xs => pairs(xs).map{ kvsE =>
+            for {
+              k <- RedisResult[K].decode(x1)
+              v <- RedisResult[V].decode(x2)
+              kvs <- kvsE
+            } yield (k, v) :: kvs
+          }
         }
         resp match {
-          case Resp.Array(Some(rs)) => pairs(rs)
+          case Resp.Array(Some(rs)) => pairs(rs).value
           case otherwise => Left(otherwise)
         }
       }
