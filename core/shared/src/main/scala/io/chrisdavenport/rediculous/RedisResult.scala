@@ -125,19 +125,22 @@ object RedisResult extends RedisResultLowPriority{
   implicit def kv[K: RedisResult, V: RedisResult]: RedisResult[List[(K, V)]] = 
     new RedisResult[List[(K, V)]] {
       def decode(resp: Resp): Either[Resp,List[(K, V)]] = {
-        def pairs(l: List[Resp]): Eval[Either[Resp, List[(K, V)]]] = l match {
-          case Nil => Eval.now(Nil.asRight: Either[Resp, List[(K, V)]])
-          case _ :: Nil => Eval.now(Left(resp): Either[Resp, List[(K, V)]])
-          case x1 :: x2 :: xs => Eval.defer(pairs(xs)).map{ kvsE =>
-            for {
-              k <- RedisResult[K].decode(x1)
-              v <- RedisResult[V].decode(x2)
-              kvs <- kvsE
-            } yield (k, v) :: kvs
-          }
-        }
+
+        def pairs(l: List[Resp]): Either[Resp,List[(K, V)]] =
+          Monad[Either[Resp, *]].tailRecM[(List[Resp], List[(K, V)]), List[(K, V)]]((l, Nil)){
+            case (l, acc) =>
+              l match {
+                case Nil => Right(Right(acc))
+                case _ :: Nil => Left(resp)
+                case x1 :: x2 :: xs => for {
+                  k <- RedisResult[K].decode(x1)
+                  v <- RedisResult[V].decode(x2)
+                } yield Left((xs, (k, v) :: acc))
+              }
+        }.map(_.reverse)
+
         resp match {
-          case Resp.Array(Some(rs)) => pairs(rs).value
+          case Resp.Array(Some(rs)) => pairs(rs)
           case otherwise => Left(otherwise)
         }
       }
