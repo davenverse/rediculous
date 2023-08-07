@@ -128,7 +128,7 @@ object RedisResult extends RedisResultLowPriority{
         def pairs(l: List[Resp]): Eval[Either[Resp, List[(K, V)]]] = l match {
           case Nil => Eval.now(Nil.asRight: Either[Resp, List[(K, V)]])
           case _ :: Nil => Eval.now(Left(resp): Either[Resp, List[(K, V)]])
-          case x1 :: x2 :: xs => pairs(xs).map{ kvsE =>
+          case x1 :: x2 :: xs => Eval.defer(pairs(xs)).map{ kvsE =>
             for {
               k <- RedisResult[K].decode(x1)
               v <- RedisResult[V].decode(x2)
