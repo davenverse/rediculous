@@ -20,7 +20,7 @@ val catsV = "2.9.0"
 val catsEffectV = "3.4.8"
 val fs2V = "3.6.1"
 
-val munitCatsEffectV = "2.0.0-M3"
+val munitCatsEffectV = "2.0.0-M4"
 
 ThisBuild / crossScalaVersions := Seq("2.12.15","2.13.11", "3.2.2")
 ThisBuild / scalaVersion := "2.13.11"
