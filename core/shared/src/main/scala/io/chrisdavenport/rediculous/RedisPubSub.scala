@@ -220,6 +220,7 @@ object RedisPubSub {
    * connections to all nodes.
    **/
   def fromConnection[F[_]: Concurrent](connection: RedisConnection[F], maxBytes: Int = 8096, clusterBroadcast: Boolean = false): Resource[F, RedisPubSub[F]] = connection match {
+    case RedisConnection.TimeoutConnection(conn, _) => fromConnection(conn, maxBytes, clusterBroadcast)
     case RedisConnection.Queued(_, sockets) => 
       sockets.flatMap{managed => 
         val messagesR = Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())
