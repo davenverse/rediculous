@@ -28,7 +28,7 @@ trait RedisConnection[F[_]]{
 }
 object RedisConnection{
   
-  private[rediculous] case class Queued[F[_]: Concurrent](queue: Queue[F, Chunk[(Either[Throwable, Resp] => F[Unit], Resp)]], usePool: Resource[F, Managed[F, Socket[F]]], timeout: Duration) extends RedisConnection[F]{
+  private[rediculous] case class Queued[F[_]: Concurrent](queue: Queue[F, Chunk[(Either[Throwable, Resp] => F[Unit], Resp)]], usePool: Resource[F, Managed[F, Socket[F]]]) extends RedisConnection[F]{
     def runRequest(inputs: Chunk[NonEmptyList[ByteVector]], key: Option[ByteVector]): F[Chunk[Resp]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
       chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map(d => (d, ({(e: Either[Throwable, Resp]) => d.complete(e).void}, resp)))).flatMap{ c => 
@@ -41,7 +41,7 @@ object RedisConnection{
     } 
   }
   private[rediculous] case class PooledConnection[F[_]: Concurrent](
-    pool: KeyPool[F, Unit, Socket[F]], timeout: Duration
+    pool: KeyPool[F, Unit, Socket[F]]
   ) extends RedisConnection[F]{
     def runRequest(inputs: Chunk[NonEmptyList[ByteVector]], key: Option[ByteVector]): F[Chunk[Resp]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
@@ -55,7 +55,7 @@ object RedisConnection{
     }
   }
 
-  private[rediculous] case class DirectConnection[F[_]: Concurrent](socket: Socket[F], timeout: Duration) extends RedisConnection[F]{
+  private[rediculous] case class DirectConnection[F[_]: Concurrent](socket: Socket[F]) extends RedisConnection[F]{
     def runRequest(inputs: Chunk[NonEmptyList[ByteVector]], key: Option[ByteVector]): F[Chunk[Resp]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
       def withSocket(socket: Socket[F]): F[Chunk[Resp]] = explicitPipelineRequest[F](socket, chunk)
@@ -63,7 +63,7 @@ object RedisConnection{
     }
   }
 
-  private[rediculous] case class Cluster[F[_]: Concurrent](queue: Queue[F, Chunk[(Either[Throwable, Resp] => F[Unit], Option[ByteVector], Option[(Host, Port)], Int, Resp)]], slots: F[ClusterSlots], usePool: (Host, Port) => Resource[F, Managed[F, Socket[F]]], timeout: Duration) extends RedisConnection[F]{
+  private[rediculous] case class Cluster[F[_]: Concurrent](queue: Queue[F, Chunk[(Either[Throwable, Resp] => F[Unit], Option[ByteVector], Option[(Host, Port)], Int, Resp)]], slots: F[ClusterSlots], usePool: (Host, Port) => Resource[F, Managed[F, Socket[F]]]) extends RedisConnection[F]{
     def runRequest(inputs: Chunk[NonEmptyList[ByteVector]], key: Option[ByteVector]): F[Chunk[Resp]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
       chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map(d => (d, ({(e: Either[Throwable, Resp]) => d.complete(e).void}, key, None, 0, resp)))).flatMap{ c => 
@@ -205,11 +205,11 @@ object RedisConnection{
         _ <- Resource.eval(auth match {
           case None => ().pure[F]
           case Some((Some(username), password)) =>
-            RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(out, defaultTimeout)).void
+            RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(out)).void
           case Some((None, password)) =>
-            RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(out, defaultTimeout)).void
+            RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(out)).void
         })
-      } yield RedisConnection.DirectConnection(out, defaultTimeout)
+      } yield new TimeoutConnection(RedisConnection.DirectConnection(out), defaultTimeout)
   }
 
   def pool[F[_]: Temporal: Network]: PooledConnectionBuilder[F] =
@@ -284,14 +284,14 @@ object RedisConnection{
             auth match {
               case None => ().pure[F]
               case Some((Some(username), password)) =>
-                RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(socket, defaultTimeout)).void
+                RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(socket)).void
               case Some((None, password)) =>
-                RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(socket, defaultTimeout)).void
+                RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(socket)).void
             }
           )
         }
       ).build
-    } yield new PooledConnection[F](kp, defaultTimeout)
+    } yield new TimeoutConnection(PooledConnection[F](kp), defaultTimeout)
 
   }
 
@@ -387,9 +387,9 @@ object RedisConnection{
               auth match {
                 case None => ().pure[F]
                 case Some((Some(username), password)) =>
-                  RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(socket, defaultTimeout)).void
+                  RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(socket)).void
                 case Some((None, password)) =>
-                  RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(socket, defaultTimeout)).void
+                  RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(socket)).void
               }
             )
           }
@@ -425,7 +425,7 @@ object RedisConnection{
             .compile
             .drain
             .background
-      } yield Queued(queue, keypool.take(()), defaultTimeout)
+      } yield new TimeoutConnection(Queued(queue, keypool.take(())), defaultTimeout)
     }
   }
 
@@ -539,16 +539,16 @@ object RedisConnection{
                 auth match {
                   case None => ().pure[F]
                   case Some((Some(username), password)) =>
-                    RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(socket, defaultTimeout)).void
+                    RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(socket)).void
                   case Some((None, password)) =>
-                    RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(socket, defaultTimeout)).void
+                    RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(socket)).void
                 }
               )
           }
         ).build
 
         // Cluster Topology Acquisition and Management
-        sockets <- Resource.eval(keypool.take((host, port)).map(_.value).map(DirectConnection(_, defaultTimeout)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_)))
+        sockets <- Resource.eval(keypool.take((host, port)).map(_.value).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_)))
         now <- Resource.eval(Temporal[F].realTime.map(_.toMillis))
         refreshLock <- Resource.eval(Semaphore[F](1L))
         refTopology <- Resource.eval(Ref[F].of((sockets, now)))
@@ -567,14 +567,14 @@ object RedisConnection{
             case ((_, setAt), now) if setAt >= (now - cacheTopologySeconds.toMillis) => Applicative[F].unit
             case ((l, _), _) => 
               val nelActions: NonEmptyList[F[ClusterSlots]] = l.map{ case (host, port) => 
-                keypool.take((host, port)).map(_.value).map(DirectConnection(_, defaultTimeout)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
+                keypool.take((host, port)).map(_.value).map(DirectConnection(_)).use(ClusterCommands.clusterslots[Redis[F, *]].run(_))
               }
               raceNThrowFirst(nelActions)
                 .flatMap(s => Clock[F].realTime.map(_.toMillis).flatMap(now => refTopology.set((s,now))))
           }
         )
         queue <- Resource.eval(Queue.bounded[F, Chunk[(Either[Throwable,Resp] => F[Unit], Option[ByteVector], Option[(Host, Port)], Int, Resp)]](maxQueued))
-        cluster = Cluster(queue, refTopology.get.map(_._1), {case(host, port) => keypool.take((host, port))}, defaultTimeout)
+        cluster = Cluster(queue, refTopology.get.map(_._1), {case(host, port) => keypool.take((host, port))})
         _ <- 
             Stream.fromQueueUnterminatedChunk(queue, chunkSizeLimit).chunks.map{chunk =>
               val s = if (chunk.nonEmpty) {
@@ -645,7 +645,7 @@ object RedisConnection{
               .compile
               .drain
               .background
-      } yield cluster
+      } yield new TimeoutConnection(cluster, defaultTimeout)
     }
   }
 
@@ -671,4 +671,10 @@ object RedisConnection{
   private def raceNThrowFirst[F[_]: Concurrent, A](nel: NonEmptyList[F[A]]): F[A] = 
     Stream(Stream.emits(nel.toList).evalMap(identity)).covary[F].parJoinUnbounded.take(1).compile.lastOrError
 
+  private class TimeoutConnection[F[_]: Temporal](rC: RedisConnection[F], duration: Duration) extends RedisConnection[F] {
+
+    def runRequest(inputs: Chunk[NonEmptyList[ByteVector]], key: Option[ByteVector]): F[Chunk[Resp]] =
+      rC.runRequest(inputs, key).timeout(duration)
+
+  }
 }
