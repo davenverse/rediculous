@@ -20,7 +20,7 @@ import _root_.io.chrisdavenport.rediculous.cluster.ClusterCommands.ClusterSlots
 import scodec.bits.ByteVector
 import fs2.io.net.Network
 
-trait RedisConnection[F[_]]{
+sealed trait RedisConnection[F[_]]{
   def runRequest(
     inputs: Chunk[NonEmptyList[ByteVector]],
     key: Option[ByteVector]
@@ -28,7 +28,7 @@ trait RedisConnection[F[_]]{
 }
 object RedisConnection{
   
-  private[rediculous] case class Queued[F[_]: Concurrent](queue: Queue[F, Chunk[(Either[Throwable, Resp] => F[Unit], Resp)]], usePool: Resource[F, Managed[F, Socket[F]]], timeout: Duration) extends RedisConnection[F]{
+  private[rediculous] case class Queued[F[_]: Temporal](queue: Queue[F, Chunk[(Either[Throwable, Resp] => F[Unit], Resp)]], usePool: Resource[F, Managed[F, Socket[F]]], timeout: Duration) extends RedisConnection[F]{
     def runRequest(inputs: Chunk[NonEmptyList[ByteVector]], key: Option[ByteVector]): F[Chunk[Resp]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
       chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map(d => (d, ({(e: Either[Throwable, Resp]) => d.complete(e).void}, resp)))).flatMap{ c => 
@@ -38,9 +38,9 @@ object RedisConnection{
           y
         }
       }
-    } 
+    }.timeout(timeout)
   }
-  private[rediculous] case class PooledConnection[F[_]: Concurrent](
+  private[rediculous] case class PooledConnection[F[_]: Temporal](
     pool: KeyPool[F, Unit, Socket[F]], timeout: Duration
   ) extends RedisConnection[F]{
     def runRequest(inputs: Chunk[NonEmptyList[ByteVector]], key: Option[ByteVector]): F[Chunk[Resp]] = {
@@ -52,26 +52,26 @@ object RedisConnection{
           case _ => Applicative[F].unit
         }
       }.rethrow
-    }
+    }.timeout(timeout)
   }
 
-  private[rediculous] case class DirectConnection[F[_]: Concurrent](socket: Socket[F], timeout: Duration) extends RedisConnection[F]{
+  private[rediculous] case class DirectConnection[F[_]: Temporal](socket: Socket[F], timeout: Duration) extends RedisConnection[F]{
     def runRequest(inputs: Chunk[NonEmptyList[ByteVector]], key: Option[ByteVector]): F[Chunk[Resp]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
       def withSocket(socket: Socket[F]): F[Chunk[Resp]] = explicitPipelineRequest[F](socket, chunk)
       withSocket(socket)
-    }
+    }.timeout(timeout)
   }
 
-  private[rediculous] case class Cluster[F[_]: Concurrent](queue: Queue[F, Chunk[(Either[Throwable, Resp] => F[Unit], Option[ByteVector], Option[(Host, Port)], Int, Resp)]], slots: F[ClusterSlots], usePool: (Host, Port) => Resource[F, Managed[F, Socket[F]]], timeout: Duration) extends RedisConnection[F]{
+  private[rediculous] case class Cluster[F[_]: Temporal](queue: Queue[F, Chunk[(Either[Throwable, Resp] => F[Unit], Option[ByteVector], Option[(Host, Port)], Int, Resp)]], slots: F[ClusterSlots], usePool: (Host, Port) => Resource[F, Managed[F, Socket[F]]], timeout: Duration) extends RedisConnection[F]{
     def runRequest(inputs: Chunk[NonEmptyList[ByteVector]], key: Option[ByteVector]): F[Chunk[Resp]] = {
       val chunk = Chunk.seq(inputs.toList.map(Resp.renderRequest))
       chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map(d => (d, ({(e: Either[Throwable, Resp]) => d.complete(e).void}, key, None, 0, resp)))).flatMap{ c => 
         queue.offer(c.map(_._2)) >> {
           c.traverse(_._1.get).flatMap(_.sequence.liftTo[F].adaptError{case e => RedisError.QueuedExceptionError(e)})
         }
-      }   
-    }
+      }
+    }.timeout(timeout)
   }
 
   // Guarantees With Socket That Each Call Receives a Response
@@ -91,7 +91,7 @@ object RedisConnection{
       .to(Chunk)
   }
 
-  def runRequestInternal[F[_]: Concurrent](connection: RedisConnection[F])(
+  def runRequestInternal[F[_]](connection: RedisConnection[F])(
     inputs: Chunk[NonEmptyList[ByteVector]],
     key: Option[ByteVector]
   ): F[Chunk[Resp]] = connection.runRequest(inputs, key)
