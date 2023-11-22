@@ -16,14 +16,14 @@ ThisBuild / tlSonatypeUseLegacyHost := true
 ThisBuild / githubWorkflowBuildPreamble ++= nativeBrewInstallWorkflowSteps.value
 
 
-val catsV = "2.9.0"
-val catsEffectV = "3.4.8"
-val fs2V = "3.6.1"
+val catsV = "2.10.0"
+val catsEffectV = "3.5.2"
+val fs2V = "3.9.3"
 
-val munitCatsEffectV = "2.0.0-M3"
+val munitCatsEffectV = "2.0.0-M4"
 
-ThisBuild / crossScalaVersions := Seq("2.12.15","2.13.11", "3.2.2")
-ThisBuild / scalaVersion := "2.13.11"
+ThisBuild / crossScalaVersions := Seq("2.12.18","2.13.12", "3.3.1")
+ThisBuild / scalaVersion := "2.13.12"
 ThisBuild / versionScheme := Some("early-semver")
 
 // Projects
@@ -35,7 +35,6 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .in(file("core"))
   .settings(
     name := "rediculous",
-    mimaPreviousArtifacts := Set(), // Bincompat breaking till next release
     testFrameworks += new TestFramework("munit.Framework"),
 
     libraryDependencies ++= Seq(
@@ -52,25 +51,25 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
 
       "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.3.2" % Test,
       "org.typelevel"               %%% "munit-cats-effect"          % munitCatsEffectV         % Test,
-      "org.scalameta"               %%% "munit-scalacheck"            % "1.0.0-M6" % Test,
+      "org.scalameta"               %%% "munit-scalacheck"            % "1.0.0-M10" % Test,
     ),
-    libraryDependencies += "org.scodec" %%% "scodec-core" % (if (scalaVersion.value.startsWith("2.")) "1.11.10" else "2.2.0")
+    libraryDependencies += "org.scodec" %%% "scodec-core" % (if (scalaVersion.value.startsWith("2.")) "1.11.10" else "2.2.2")
   ).jsSettings(
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)}
   ).jvmSettings(
-    libraryDependencies += "com.github.jnr" % "jnr-unixsocket" % "0.38.15" % Test,
+    libraryDependencies += "com.github.jnr" % "jnr-unixsocket" % "0.38.20" % Test,
   )
   .platformsSettings(JVMPlatform, JSPlatform)(
     libraryDependencies ++= Seq(
-      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.8" % Test,
+      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.10" % Test,
     )
   )
   .nativeEnablePlugins(ScalaNativeBrewedConfigPlugin)
   .platformsSettings(NativePlatform)(
     libraryDependencies ++= Seq(
-      "com.armanbilge" %%% "epollcat" % "0.1.4" % Test
+      "com.armanbilge" %%% "epollcat" % "0.1.6" % Test
     ),
-    Test / nativeBrewFormulas ++= Set("s2n", "utf8proc"),
+    Test / nativeBrewFormulas ++= Set("s2n"),
     Test / envVars ++= Map("S2N_DONT_MLOCK" -> "1")
   )
 
@@ -83,12 +82,12 @@ lazy val examples = crossProject(JVMPlatform, JSPlatform)
   .settings(
     name := "rediculous-examples",
     run / fork := true,
-    scalaJSUseMainModuleInitializer := true,
   ).jsSettings(
     libraryDependencies ++= Seq(
       "io.github.cquiroz" %%% "scala-java-time" % "2.4.0"
     ),
     Compile / mainClass := Some("BasicExample"),
+    scalaJSUseMainModuleInitializer := true,
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)},
     scalaJSStage := FullOptStage,
   )
@@ -97,4 +96,5 @@ lazy val examplesJS = examples.js
 
 lazy val site = project.in(file("site"))
   .enablePlugins(TypelevelSitePlugin)
+  .settings(tlSiteIsTypelevelProject := Some(TypelevelProject.Affiliate))
   .dependsOn(core.jvm)
