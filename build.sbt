@@ -19,7 +19,7 @@ ThisBuild / githubWorkflowBuildPreamble ++= nativeBrewInstallWorkflowSteps.value
 
 
 val catsV = "2.10.0"
-val catsEffectV = "3.5.2"
+val catsEffectV = "3.5.3"
 val fs2V = "3.9.3"
 
 val munitCatsEffectV = "2.0.0-M4"
