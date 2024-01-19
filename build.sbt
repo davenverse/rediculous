@@ -48,7 +48,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "co.fs2"                      %%% "fs2-io"                     % fs2V,
       "co.fs2"                      %%% "fs2-scodec"                 % fs2V,
 
-      "org.typelevel"               %%% "keypool"                    % "0.4.8",
+      "org.typelevel"               %%% "keypool"                    % "0.4.9",
       
 
       "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.3.2" % Test,
