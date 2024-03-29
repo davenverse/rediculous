@@ -38,7 +38,7 @@ object RedisConnection{
           y
         }
       }
-    }.timeoutTo(commandTimeout, Defer[F].defer(Temporal[F].raiseError(RedisError.CommandTimeoutException(commandTimeout))))
+    }.timeoutTo(commandTimeout, Defer[F].defer(Temporal[F].raiseError[Chunk[Resp]](RedisError.CommandTimeoutException(commandTimeout))))
   }
   private[rediculous] case class PooledConnection[F[_]: Temporal](
     pool: KeyPool[F, Unit, Socket[F]],
@@ -54,7 +54,7 @@ object RedisConnection{
           case _ => Applicative[F].unit
         }
       }.rethrow
-    }.timeoutTo(commandTimeout, Defer[F].defer(Temporal[F].raiseError(RedisError.CommandTimeoutException(commandTimeout))))
+    }.timeoutTo(commandTimeout, Defer[F].defer(Temporal[F].raiseError[Chunk[Resp]](RedisError.CommandTimeoutException(commandTimeout))))
   }
 
   private[rediculous] case class DirectConnection[F[_]: Temporal](socket: Socket[F], commandTimeout: Duration, redisRequestTimeout: Duration) extends RedisConnection[F]{
@@ -62,7 +62,7 @@ object RedisConnection{
       val chunk = Chunk.from(inputs.toList.map(Resp.renderRequest))
       def withSocket(socket: Socket[F]): F[Chunk[Resp]] = explicitPipelineRequest[F](socket, chunk, Defaults.maxBytes, redisRequestTimeout)
       withSocket(socket)
-    }.timeoutTo(commandTimeout, Defer[F].defer(Temporal[F].raiseError(RedisError.CommandTimeoutException(commandTimeout))))
+    }.timeoutTo(commandTimeout, Defer[F].defer(Temporal[F].raiseError[Chunk[Resp]](RedisError.CommandTimeoutException(commandTimeout))))
   }
 
   private[rediculous] case class Cluster[F[_]: Temporal](queue: Queue[F, Chunk[(Either[Throwable, Resp] => F[Unit], Option[ByteVector], Option[(Host, Port)], Int, Resp)]], slots: F[ClusterSlots], usePool: (Host, Port) => Resource[F, Managed[F, Socket[F]]], commandTimeout: Duration) extends RedisConnection[F]{
@@ -73,7 +73,7 @@ object RedisConnection{
           c.traverse(_._1.get).flatMap(_.sequence.liftTo[F].adaptError{case e => RedisError.QueuedExceptionError(e)})
         }
       }
-    }.timeoutTo(commandTimeout, Defer[F].defer(Temporal[F].raiseError(RedisError.CommandTimeoutException(commandTimeout))))
+    }.timeoutTo(commandTimeout, Defer[F].defer(Temporal[F].raiseError[Chunk[Resp]](RedisError.CommandTimeoutException(commandTimeout))))
   }
 
   // Guarantees With Socket That Each Call Receives a Response
@@ -94,7 +94,7 @@ object RedisConnection{
         .compile
         .to(Chunk)
 
-      request.timeoutTo(redisRequestTimeout, Defer[F].defer(Temporal[F].raiseError(RedisError.RedisRequestTimeoutException(redisRequestTimeout))))
+      request.timeoutTo(redisRequestTimeout, Defer[F].defer(Temporal[F].raiseError[Chunk[Resp]](RedisError.RedisRequestTimeoutException(redisRequestTimeout))))
     }
   }
 
