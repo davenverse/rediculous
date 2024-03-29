@@ -144,11 +144,21 @@ object RedisConnection{
     val maxIdle: Int = 100
     val maxTotal: Int = 100
 
-    val commandTimeout: Duration = 30.seconds // If using a blocking operation this is likely inappropriate.
-    @deprecated("0.5.2", "Use Defaults.commandTimeout instead")
-    val requestTimeout: Duration = commandTimeout
+    // If using a blocking operation these is likely inappropriate.
+    // You want Command Timeout to be higher than RedisRequestTimeout
+    val ownedConnectionCommandTimeout: Duration = 10.seconds
+    val ownedConnectionRedisRequestTimeout: Duration = 5.seconds
 
-    val redisRequestTimeout = 20.seconds // If using a blocking operation this is likely inappropriate.
+    // If using a blocking operation this is likely inappropriate.
+    val sharedConnectionCommandTimeout: Duration = 5.seconds
+    val sharedConnectionRedisRequestTimeout: Duration = 5.seconds
+
+
+    @deprecated("0.5.2", "Use Defaults.ownedConnectionCommandTimeout or Defaults. instead")
+    val requestTimeout: Duration = 30.seconds
+
+
+
 
 
     // TODO config
@@ -164,8 +174,8 @@ object RedisConnection{
       TLSParameters.Default,
       None,
       Defaults.useTLS,
-      Defaults.commandTimeout,
-      Defaults.redisRequestTimeout,
+      Defaults.ownedConnectionCommandTimeout,
+      Defaults.ownedConnectionRedisRequestTimeout,
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
@@ -233,9 +243,9 @@ object RedisConnection{
         _ <- Resource.eval(auth match {
           case None => ().pure[F]
           case Some((Some(username), password)) =>
-            RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(out, commandTimeout, redisRequestTimeout)).void
+            RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(out, Duration.Inf, redisRequestTimeout)).void
           case Some((None, password)) =>
-            RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(out, commandTimeout, redisRequestTimeout)).void
+            RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(out, Duration.Inf, redisRequestTimeout)).void
         })
       } yield RedisConnection.DirectConnection(out, commandTimeout, redisRequestTimeout)
   }
@@ -252,8 +262,8 @@ object RedisConnection{
       Defaults.idleTimeAllowedInPool,
       Defaults.maxIdle,
       Defaults.maxTotal,
-      Defaults.commandTimeout,
-      Defaults.redisRequestTimeout,
+      Defaults.ownedConnectionCommandTimeout,
+      Defaults.ownedConnectionRedisRequestTimeout,
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
@@ -338,9 +348,9 @@ object RedisConnection{
             auth match {
               case None => ().pure[F]
               case Some((Some(username), password)) =>
-                RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(socket, commandTimeout, redisRequestTimeout)).void
+                RedisCommands.auth[Redis[F, *]](username, password).run(DirectConnection(socket, Duration.Inf, redisRequestTimeout)).void
               case Some((None, password)) =>
-                RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(socket, commandTimeout, redisRequestTimeout)).void
+                RedisCommands.auth[Redis[F, *]](password).run(DirectConnection(socket, Duration.Inf, redisRequestTimeout)).void
             }
           )
         }
@@ -368,8 +378,8 @@ object RedisConnection{
       Defaults.idleTimeAllowedInPool,
       Defaults.maxIdle,
       Defaults.maxTotal,
-      Defaults.commandTimeout,
-      Defaults.redisRequestTimeout,
+      Defaults.sharedConnectionCommandTimeout,
+      Defaults.sharedConnectionRedisRequestTimeout,
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
@@ -537,8 +547,8 @@ object RedisConnection{
       Defaults.idleTimeAllowedInPool,
       Defaults.maxIdle,
       Defaults.maxTotal,
-      Defaults.commandTimeout,
-      Defaults.redisRequestTimeout,
+      Defaults.sharedConnectionCommandTimeout,
+      Defaults.sharedConnectionRedisRequestTimeout,
     )
 
   @deprecated("Use overload that takes a Network", "0.4.1")
