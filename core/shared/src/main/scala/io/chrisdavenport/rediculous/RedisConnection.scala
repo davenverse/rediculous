@@ -65,7 +65,7 @@ object RedisConnection{
     }.timeoutTo(commandTimeout, Defer[F].defer(Temporal[F].raiseError(RedisError.CommandTimeoutException(commandTimeout))))
   }
 
-  private[rediculous] case class Cluster[F[_]: Concurrent](queue: Queue[F, Chunk[(Either[Throwable, Resp] => F[Unit], Option[ByteVector], Option[(Host, Port)], Int, Resp)]], slots: F[ClusterSlots], usePool: (Host, Port) => Resource[F, Managed[F, Socket[F]]]) extends RedisConnection[F]{
+  private[rediculous] case class Cluster[F[_]: Temporal](queue: Queue[F, Chunk[(Either[Throwable, Resp] => F[Unit], Option[ByteVector], Option[(Host, Port)], Int, Resp)]], slots: F[ClusterSlots], usePool: (Host, Port) => Resource[F, Managed[F, Socket[F]]], commandTimeout: Duration) extends RedisConnection[F]{
     def runRequest(inputs: Chunk[NonEmptyList[ByteVector]], key: Option[ByteVector]): F[Chunk[Resp]] = {
       val chunk = Chunk.from(inputs.toList.map(Resp.renderRequest))
       chunk.traverse(resp => Deferred[F, Either[Throwable, Resp]].map(d => (d, ({(e: Either[Throwable, Resp]) => d.complete(e).void}, key, None, 0, resp)))).flatMap{ c =>
@@ -73,7 +73,7 @@ object RedisConnection{
           c.traverse(_._1.get).flatMap(_.sequence.liftTo[F].adaptError{case e => RedisError.QueuedExceptionError(e)})
         }
       }
-    }
+    }.timeoutTo(commandTimeout, Defer[F].defer(Temporal[F].raiseError(RedisError.CommandTimeoutException(commandTimeout))))
   }
 
   // Guarantees With Socket That Each Call Receives a Response
@@ -693,7 +693,7 @@ object RedisConnection{
           }
         )
         queue <- Resource.eval(Queue.bounded[F, Chunk[(Either[Throwable,Resp] => F[Unit], Option[ByteVector], Option[(Host, Port)], Int, Resp)]](maxQueued))
-        cluster = Cluster(queue, refTopology.get.map(_._1), {case(host, port) => keypool.take((host, port))})
+        cluster = Cluster(queue, refTopology.get.map(_._1), {case(host, port) => keypool.take((host, port))}, commandTimeout)
         _ <- 
             Stream.fromQueueUnterminatedChunk(queue, chunkSizeLimit).chunks.map{chunk =>
               val s = if (chunk.nonEmpty) {
@@ -708,7 +708,7 @@ object RedisConnection{
                       keypool.take(server).attempt.use{
                         case Right(m) =>
                           val out = Chunk.from(rest.map(_._5))
-                          explicitPipelineRequest(m.value, out, Defaults.maxBytes, commandTimeout).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
+                          explicitPipelineRequest(m.value, out, Defaults.maxBytes, redisRequestTimeout).attempt.flatTap{// Currently Guarantee Chunk.size === returnSize
                             case Left(_) => m.canBeReused.set(Reusable.DontReuse)
                             case _ => Applicative[F].unit
                           }
