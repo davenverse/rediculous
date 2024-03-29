@@ -61,6 +61,10 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.rediculous.RedisConnection#ClusterConnectionBuilder.this"),
       ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.rediculous.RedisConnection#PooledConnectionBuilder.this"),
       ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.rediculous.RedisConnection#QueuedConnectionBuilder.this"),
+
+      ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.rediculous.RedisConnection#DirectConnectionBuilder.this"),
+      ProblemFilters.exclude[MissingClassProblem]("io.chrisdavenport.rediculous.RedisConnection$TimeoutConnection"),
+      ProblemFilters.exclude[MissingClassProblem]("io.chrisdavenport.rediculous.RedisConnection$TimeoutConnection$")
     )
   ).jsSettings(
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)}
