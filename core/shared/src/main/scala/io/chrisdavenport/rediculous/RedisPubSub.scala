@@ -245,7 +245,7 @@ object RedisPubSub {
           }
         }
       }
-    case RedisConnection.DirectConnection(s, _, _) => 
+    case RedisConnection.DirectConnection(s, _, _) =>
       val messagesR = Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())
       val onNonMessageR = Concurrent[F].ref((_: PubSubReply) => Applicative[F].unit)
       val onUnhandledMessageR = Concurrent[F].ref((_: PubSubMessage) => Applicative[F].unit)
@@ -254,7 +254,7 @@ object RedisPubSub {
         pubsub => pubsub.unsubscribeAll
       }
       }
-    case RedisConnection.Cluster(_, topology, sockets) => 
+    case RedisConnection.Cluster(_, topology, sockets, _) =>
       val messagesR = Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())
       val onNonMessageR = Concurrent[F].ref((_: PubSubReply) => Applicative[F].unit)
       val onUnhandledMessageR = Concurrent[F].ref((_: PubSubMessage) => Applicative[F].unit)
