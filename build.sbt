@@ -19,8 +19,9 @@ ThisBuild / githubWorkflowBuildPreamble ++= nativeBrewInstallWorkflowSteps.value
 
 
 val catsV = "2.10.0"
-val catsEffectV = "3.5.2"
+val catsEffectV = "3.5.3"
 val fs2V = "3.9.4"
+
 
 val munitCatsEffectV = "2.0.0-M4"
 
@@ -48,7 +49,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "co.fs2"                      %%% "fs2-io"                     % fs2V,
       "co.fs2"                      %%% "fs2-scodec"                 % fs2V,
 
-      "org.typelevel"               %%% "keypool"                    % "0.4.8",
+      "org.typelevel"               %%% "keypool"                    % "0.4.9",
       
 
       "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.3.2" % Test,
