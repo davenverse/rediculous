@@ -1,6 +1,6 @@
 import com.typesafe.tools.mima.core._
 
-ThisBuild / tlBaseVersion := "0.5" // your current series x.y
+ThisBuild / tlBaseVersion := "0.6" // your current series x.y
 
 ThisBuild / organization := "io.chrisdavenport"
 ThisBuild / organizationName := "Christopher Davenport"
@@ -56,20 +56,6 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.scalameta"               %%% "munit-scalacheck"            % "1.0.0-M10" % Test,
     ),
     libraryDependencies += "org.scodec" %%% "scodec-core" % (if (scalaVersion.value.startsWith("2.")) "1.11.10" else "2.2.2"),
-
-    mimaBinaryIssueFilters ++= Seq(
-      ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.rediculous.RedisConnection#ClusterConnectionBuilder.this"),
-      ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.rediculous.RedisConnection#PooledConnectionBuilder.this"),
-      ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.rediculous.RedisConnection#QueuedConnectionBuilder.this"),
-
-      ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.rediculous.RedisConnection#DirectConnectionBuilder.this"),
-      ProblemFilters.exclude[MissingClassProblem]("io.chrisdavenport.rediculous.RedisConnection$TimeoutConnection"),
-      ProblemFilters.exclude[MissingClassProblem]("io.chrisdavenport.rediculous.RedisConnection$TimeoutConnection$"),
-      ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.rediculous.RedisConnection.explicitPipelineRequest"),
-      ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.rediculous.RedisConnection.explicitPipelineRequest$default$3"),
-      ProblemFilters.exclude[MissingFieldProblem]("io.chrisdavenport.rediculous.RedisConnection.TimeoutConnection"),
-
-    )
   ).jsSettings(
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)}
   ).jvmSettings(
