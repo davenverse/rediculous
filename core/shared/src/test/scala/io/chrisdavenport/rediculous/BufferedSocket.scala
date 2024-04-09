@@ -1,11 +1,9 @@
 package io.chrisdavenport.rediculous.util
 
-import cats._
 import cats.syntax.all._
 import fs2._
 import fs2.io.net.Socket
 import cats.effect._
-import cats.effect.std.Queue
 import com.comcast.ip4s.{IpAddress, SocketAddress}
 
 private[rediculous] trait BufferedSocket[F[_]] extends Socket[F]{
@@ -30,12 +28,12 @@ private[rediculous] object BufferedSocket{
 
     // This can return more bytes than max bytes, may want to refine this later
     def read(maxBytes: Int): F[Option[Chunk[Byte]]] = takeBuffer.flatMap{
-      case s@Some(value) => value.some.pure[F]
+      case Some(value) => value.some.pure[F]
       case None => socket.read(maxBytes)
     }
     
     def readN(numBytes: Int): F[Chunk[Byte]] = takeBuffer.flatMap{
-      case s@Some(value) => value.pure[F]
+      case Some(value) => value.pure[F]
       case None => socket.readN(numBytes)
     }
     
@@ -53,7 +51,7 @@ private[rediculous] object BufferedSocket{
     
     def write(bytes: Chunk[Byte]): F[Unit] = socket.write(bytes)
     
-    def writes: Pipe[F,Byte,INothing] = socket.writes
+    def writes: Pipe[F,Byte,Nothing] = socket.writes
     
   }
 

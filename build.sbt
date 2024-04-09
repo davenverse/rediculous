@@ -1,6 +1,6 @@
 import com.typesafe.tools.mima.core._
 
-ThisBuild / tlBaseVersion := "0.5" // your current series x.y
+ThisBuild / tlBaseVersion := "0.6" // your current series x.y
 
 ThisBuild / organization := "io.chrisdavenport"
 ThisBuild / organizationName := "Christopher Davenport"
@@ -57,12 +57,6 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.scalameta"               %%% "munit-scalacheck"            % "1.0.0-M10" % Test,
     ),
     libraryDependencies += "org.scodec" %%% "scodec-core" % (if (scalaVersion.value.startsWith("2.")) "1.11.10" else "2.2.2"),
-
-    mimaBinaryIssueFilters ++= Seq(
-      ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.rediculous.RedisConnection#ClusterConnectionBuilder.this"),
-      ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.rediculous.RedisConnection#PooledConnectionBuilder.this"),
-      ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.rediculous.RedisConnection#QueuedConnectionBuilder.this"),
-    )
   ).jsSettings(
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)}
   ).jvmSettings(

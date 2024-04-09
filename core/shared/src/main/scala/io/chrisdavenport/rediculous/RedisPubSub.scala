@@ -220,20 +220,20 @@ object RedisPubSub {
    * connections to all nodes.
    **/
   def fromConnection[F[_]: Concurrent](connection: RedisConnection[F], maxBytes: Int = 8096, clusterBroadcast: Boolean = false): Resource[F, RedisPubSub[F]] = connection match {
-    case RedisConnection.TimeoutConnection(conn, _) => fromConnection(conn, maxBytes, clusterBroadcast)
-    case RedisConnection.Queued(_, sockets) => 
+    // case RedisConnection.TimeoutConnection(conn, _, _, _) => fromConnection(conn, maxBytes, clusterBroadcast)
+    case RedisConnection.Queued(_, sockets, _) =>
       sockets.flatMap{managed => 
         val messagesR = Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())
         val onNonMessageR = Concurrent[F].ref((_: PubSubReply) => Applicative[F].unit)
         val onUnhandledMessageR = Concurrent[F].ref((_: PubSubMessage) => Applicative[F].unit)
-        Resource.eval((messagesR, onNonMessageR, onUnhandledMessageR).tupled).flatMap{case (ref, onNonMessage, onUnhandledMessage) => 
+        Resource.eval((messagesR, onNonMessageR, onUnhandledMessageR).tupled).flatMap{case (ref, onNonMessage, onUnhandledMessage) =>
           Resource.makeCase(socket(connection, managed.value :: Nil, maxBytes, onNonMessage, onUnhandledMessage, ref).pure[F]){
             case (_, Resource.ExitCase.Errored(_)) | (_, Resource.ExitCase.Canceled) => managed.canBeReused.set(Reusable.DontReuse)
             case (pubsub, Resource.ExitCase.Succeeded) =>  pubsub.unsubscribeAll
           }
         }
       }
-    case RedisConnection.PooledConnection(pool) => 
+    case RedisConnection.PooledConnection(pool, _, _) =>
       pool.take(()).flatMap{managed =>
         val messagesR = Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())
         val onNonMessageR = Concurrent[F].ref((_: PubSubReply) => Applicative[F].unit)
@@ -245,7 +245,7 @@ object RedisPubSub {
           }
         }
       }
-    case RedisConnection.DirectConnection(s) => 
+    case RedisConnection.DirectConnection(s, _, _) =>
       val messagesR = Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())
       val onNonMessageR = Concurrent[F].ref((_: PubSubReply) => Applicative[F].unit)
       val onUnhandledMessageR = Concurrent[F].ref((_: PubSubMessage) => Applicative[F].unit)
@@ -254,7 +254,7 @@ object RedisPubSub {
         pubsub => pubsub.unsubscribeAll
       }
       }
-    case RedisConnection.Cluster(_, topology, sockets) => 
+    case RedisConnection.Cluster(_, topology, sockets, _) =>
       val messagesR = Concurrent[F].ref(Map[String, RedisPubSub.PubSubMessage => F[Unit]]())
       val onNonMessageR = Concurrent[F].ref((_: PubSubReply) => Applicative[F].unit)
       val onUnhandledMessageR = Concurrent[F].ref((_: PubSubMessage) => Applicative[F].unit)

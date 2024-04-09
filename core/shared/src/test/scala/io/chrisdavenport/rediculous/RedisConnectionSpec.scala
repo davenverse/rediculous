@@ -18,7 +18,7 @@ class RedisConnectionSpec extends RediculousCrossSuite {
       def endOfInput: IO[Unit] = ???
 
       def endOfOutput: IO[Unit] = ???
-      
+
       def isOpen: IO[Boolean] = ???
       
       def remoteAddress: IO[SocketAddress[IpAddress]] = ???
@@ -37,7 +37,7 @@ class RedisConnectionSpec extends RediculousCrossSuite {
       def server(address: Option[Host], port: Option[Port], options: List[SocketOption]): fs2.Stream[IO,Socket[IO]] = ???
       
       def serverResource(address: Option[Host], port: Option[Port], options: List[SocketOption]): Resource[IO,(SocketAddress[IpAddress], fs2.Stream[IO,Socket[IO]])] = ???
-      
+
     }
 
     RedisConnection.queued[IO].withSocketGroup(sg).build
