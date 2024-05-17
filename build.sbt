@@ -60,7 +60,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   ).jsSettings(
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)}
   ).jvmSettings(
-    libraryDependencies += "com.github.jnr" % "jnr-unixsocket" % "0.38.20" % Test,
+    libraryDependencies += "com.github.jnr" % "jnr-unixsocket" % "0.38.22" % Test,
   )
   .platformsSettings(JVMPlatform, JSPlatform)(
     libraryDependencies ++= Seq(
