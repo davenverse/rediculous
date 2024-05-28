@@ -18,7 +18,7 @@ ThisBuild / tlSonatypeUseLegacyHost := true
 ThisBuild / githubWorkflowBuildPreamble ++= nativeBrewInstallWorkflowSteps.value
 
 
-val catsV = "2.10.0"
+val catsV = "2.11.0"
 val catsEffectV = "3.5.3"
 val fs2V = "3.9.4"
 
