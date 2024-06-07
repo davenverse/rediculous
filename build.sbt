@@ -87,7 +87,7 @@ lazy val examples = crossProject(JVMPlatform, JSPlatform)
     run / fork := true,
   ).jsSettings(
     libraryDependencies ++= Seq(
-      "io.github.cquiroz" %%% "scala-java-time" % "2.4.0"
+      "io.github.cquiroz" %%% "scala-java-time" % "2.6.0"
     ),
     Compile / mainClass := Some("BasicExample"),
     scalaJSUseMainModuleInitializer := true,
