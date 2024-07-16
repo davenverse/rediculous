@@ -12,21 +12,18 @@ ThisBuild / developers := List(
 
 ThisBuild / tlCiReleaseBranches := Seq("main")
 
-// true by default, set to false to publish to s01.oss.sonatype.org
-ThisBuild / tlSonatypeUseLegacyHost := true
-
 ThisBuild / githubWorkflowBuildPreamble ++= nativeBrewInstallWorkflowSteps.value
 
 
-val catsV = "2.10.0"
-val catsEffectV = "3.5.3"
+val catsV = "2.11.0"
+val catsEffectV = "3.5.4"
 val fs2V = "3.9.4"
 
 
 val munitCatsEffectV = "2.0.0-M4"
 
-ThisBuild / crossScalaVersions := Seq("2.12.18","2.13.12", "3.3.1")
-ThisBuild / scalaVersion := "2.13.12"
+ThisBuild / crossScalaVersions := Seq("2.12.19","2.13.14", "3.4.2")
+ThisBuild / scalaVersion := "2.13.14"
 ThisBuild / versionScheme := Some("early-semver")
 
 // Projects
@@ -60,11 +57,11 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   ).jsSettings(
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)}
   ).jvmSettings(
-    libraryDependencies += "com.github.jnr" % "jnr-unixsocket" % "0.38.20" % Test,
+    libraryDependencies += "com.github.jnr" % "jnr-unixsocket" % "0.38.22" % Test,
   )
   .platformsSettings(JVMPlatform, JSPlatform)(
     libraryDependencies ++= Seq(
-      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.10" % Test,
+      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.11" % Test,
     )
   )
   .nativeEnablePlugins(ScalaNativeBrewedConfigPlugin)
@@ -87,7 +84,7 @@ lazy val examples = crossProject(JVMPlatform, JSPlatform)
     run / fork := true,
   ).jsSettings(
     libraryDependencies ++= Seq(
-      "io.github.cquiroz" %%% "scala-java-time" % "2.4.0"
+      "io.github.cquiroz" %%% "scala-java-time" % "2.6.0"
     ),
     Compile / mainClass := Some("BasicExample"),
     scalaJSUseMainModuleInitializer := true,
