@@ -20,7 +20,7 @@ val catsEffectV = "3.5.4"
 val fs2V = "3.10.2"
 
 
-val munitCatsEffectV = "2.0.0-M4"
+val munitCatsEffectV = "2.0.0"
 
 ThisBuild / crossScalaVersions := Seq("2.12.19","2.13.14", "3.4.2")
 ThisBuild / scalaVersion := "2.13.14"
@@ -51,7 +51,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
 
       "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.3.2" % Test,
       "org.typelevel"               %%% "munit-cats-effect"          % munitCatsEffectV         % Test,
-      "org.scalameta"               %%% "munit-scalacheck"            % "1.0.0-M10" % Test,
+      "org.scalameta"               %%% "munit-scalacheck"            % "1.0.0" % Test,
     ),
     libraryDependencies += "org.scodec" %%% "scodec-core" % (if (scalaVersion.value.startsWith("2.")) "1.11.10" else "2.2.2"),
   ).jsSettings(
@@ -61,7 +61,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   )
   .platformsSettings(JVMPlatform, JSPlatform)(
     libraryDependencies ++= Seq(
-      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.11" % Test,
+      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.12" % Test,
     )
   )
   .nativeEnablePlugins(ScalaNativeBrewedConfigPlugin)
