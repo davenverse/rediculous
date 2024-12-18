@@ -285,4 +285,53 @@ class RedisCommandsSpec extends CatsEffectSuite {
         .assertEquals((1L, 1L))
     }
   }
+
+  test("geospatial"){
+    import RedisCommands._
+    import GeoUnits.Km
+    import GeoSearchFrom._
+    import GeoSearchBy._
+
+    redisConnection().flatMap{ connection =>
+      val action = for {
+        _ <- geoadd[RedisIO]("bikes:rentable", List(((-122.27652, 37.805186), "station:1")))
+        _ <- geoadd[RedisIO]("bikes:rentable", List(((-122.2674626, 37.8062344), "station:2")))
+        _ <- geoadd[RedisIO]("bikes:rentable", List(((-122.2469854, 37.8104049), "station:3")))
+        m <- geosearch[RedisIO]("bikes:rentable", Member("station:1"), Radius(5, Km))
+        ll <- geosearch[RedisIO]("bikes:rentable", LonLat(-122.2612767, 37.7936847), Box(5, 5, Km))
+        ds <- geosearchwithdist[RedisIO]("bikes:rentable", LonLat(-122.2612767, 37.7936847), Radius(5, Km))
+        cs <- geosearchwithcoord[RedisIO]("bikes:rentable", LonLat(-122.2612767, 37.7936847), Radius(5, Km))
+        hs <- geosearchwithhash[RedisIO]("bikes:rentable", LonLat(-122.2612767, 37.7936847), Radius(5, Km))
+        dcs <- geosearchwithdistcoord[RedisIO]("bikes:rentable", LonLat(-122.2612767, 37.7936847), Radius(5, Km))
+        dchs <- geosearchwithdistcoordhash[RedisIO]("bikes:rentable", LonLat(-122.2612767, 37.7936847), Radius(5, Km))
+      } yield (m, ll, ds, cs, hs, dcs, dchs)
+
+      action
+        .run(connection)
+        .assertEquals((
+          List("station:1", "station:2", "station:3"),
+          List("station:1", "station:2", "station:3"),
+          List(("station:1", 1.8523), ("station:2", 1.4979), ("station:3", 2.2441)),
+          List(("station:1", (-122.27652043104172, 37.80518485897756)), ("station:2", (-122.26745992898941, 37.80623423353753)), ("station:3", (-122.24698394536972, 37.81040384984464))),
+          List(("station:1", 1367952638197536L), ("station:2", 1367952641196278L), ("station:3", 1367953014079341L)),
+          List(("station:1", 1.8523, (-122.27652043104172, 37.80518485897756)), ("station:2", 1.4979, (-122.26745992898941, 37.80623423353753)), ("station:3", 2.2441, (-122.24698394536972, 37.81040384984464))),
+          List(("station:1", 1.8523, 1367952638197536L, (-122.27652043104172, 37.80518485897756)), ("station:2", 1.4979, 1367952641196278L, (-122.26745992898941, 37.80623423353753)), ("station:3", 2.2441, 1367953014079341L, (-122.24698394536972, 37.81040384984464)))
+        ))
+    }
+  }
+
+  test("mset"){
+    redisConnection().flatMap{ connection =>
+      val action = for {
+        _ <- RedisCommands.mset[RedisIO](("foo", "1"), ("bar", "2"))
+        xs <- RedisCommands.mget[RedisIO]("foo", "bar", "baz")
+      } yield xs
+
+      action.run(connection).assertEquals(List(
+        "1".some,
+        "2".some,
+        None
+      ))
+    }
+  }
 }

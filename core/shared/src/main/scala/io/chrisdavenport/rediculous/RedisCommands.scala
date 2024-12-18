@@ -984,10 +984,7 @@ object RedisCommands {
   def hsetnx[F[_]: RedisCtx](key: String, field: String, value: String): F[Boolean] = 
     RedisCtx[F].keyed(key, NEL.of("HSETNX", key.encode, field.encode, value.encode))
 
-  private[rediculous] def mset[F[_]: RedisCtx](keyvalue: (String, String)): F[Status] =
-    RedisCtx[F].keyed(keyvalue._1, NEL("MSET", List(keyvalue._1.encode, keyvalue._2.encode)))
-
-  def mset[F[_]: RedisCtx](keyValue: (String, String), keyValues: (String, String)*): F[List[Status]] = {
+  def mset[F[_]: RedisCtx](keyValue: (String, String), keyValues: (String, String)*): F[Status] = {
     val command = NEL("MSET", (keyValue :: keyValues.toList).flatMap(t => List(t._1.encode, t._2.encode)))
     RedisCtx[F].keyed(keyValue._1, command)
   }
@@ -1150,6 +1147,105 @@ object RedisCommands {
 
   def publish[F[_]: RedisCtx](channel: String, message: String): F[Int] = 
     RedisCtx[F].unkeyed[Int](cats.data.NonEmptyList.of("PUBLISH", channel, message))
+
+  final case class GeoAddOpts(condition: Option[Condition], change: Boolean)
+  object GeoAddOpts {
+    val default = GeoAddOpts(None, false)
+  }
+
+  def geoadd[F[_]: RedisCtx](key: String, lonLatMember: List[((Double, Double), String)], options: GeoAddOpts = GeoAddOpts.default): F[Long] = {
+    val items = lonLatMember.flatMap{ case ((x, y), m) => List(x.encode, y.encode, m.encode)}
+    val condition = options.condition.toList.map(_.encode)
+    val change = Alternative[List].guard(options.change).as("CH")
+    RedisCtx[F].keyed(key, NEL("GEOADD", key :: condition ::: change ::: items))
+  }
+
+  sealed trait GeoUnits
+  object GeoUnits {
+    case object M  extends GeoUnits
+    case object Km extends GeoUnits
+    case object Ft extends GeoUnits
+    case object Mi extends GeoUnits
+    implicit val arg: RedisArg[GeoUnits] = RedisArg[String].contramap[GeoUnits]{
+      case M  => "M"
+      case Km => "KM"
+      case Ft => "FT"
+      case Mi => "MI"
+    }
+  }
+
+  def geodist[F[_]: RedisCtx](key: String, member1: String, member2: String, units: Option[GeoUnits]): F[Double] =
+    RedisCtx[F].keyed(key, NEL("GEODIST", List(key, member1, member2) ::: units.map(_.encode).toList))
+
+  def geohash[F[_]: RedisCtx](key: String, members: List[String]): F[List[String]] =
+    RedisCtx[F].keyed(key, NEL("GEOHASH", members))
+
+  def geopos[F[_]: RedisCtx](key: String, members: List[String]): F[List[(Double, Double)]] =
+    RedisCtx[F].keyed(key, NEL("GEOPOS", members))
+
+  sealed trait GeoSearchFrom
+  object GeoSearchFrom {
+    final case class Member(member: String)           extends GeoSearchFrom
+    final case class LonLat(lon: Double, lat: Double) extends GeoSearchFrom
+  }
+
+  sealed trait GeoSearchBy
+  object GeoSearchBy {
+    final case class Radius(radius: Double, units: GeoUnits)             extends GeoSearchBy
+    final case class Box(width: Double, height: Double, units: GeoUnits) extends GeoSearchBy
+  }
+
+  sealed trait Sort
+  object Sort {
+    case object Asc  extends Sort
+    case object Desc extends Sort
+    implicit val arg: RedisArg[Sort] = RedisArg[String].contramap[Sort]{
+      case Asc  => "ASC"
+      case Desc => "DESC"
+    }
+  }
+
+  final case class Count(count: Int, any: Boolean = false)
+
+  final case class GeoSearchOpts(sort: Option[Sort], count: Option[Count])
+  object GeoSearchOpts {
+    val default = GeoSearchOpts(None, None)
+  }
+
+  def geosearch[F[_]: RedisCtx](key: String, from: GeoSearchFrom, by: GeoSearchBy, options: GeoSearchOpts = GeoSearchOpts.default): F[List[String]] =
+    RedisCtx[F].keyed(key, NEL("GEOSEARCH", geosearchCmd(key, from, by, options)))
+
+  def geosearchwithcoord[F[_]: RedisCtx](key: String, from: GeoSearchFrom, by: GeoSearchBy, options: GeoSearchOpts = GeoSearchOpts.default): F[List[(String, (Double, Double))]] =
+    RedisCtx[F].keyed(key, NEL("GEOSEARCH", geosearchCmd(key, from, by, options) ::: List("WITHCOORD")))
+
+  def geosearchwithdist[F[_]: RedisCtx](key: String, from: GeoSearchFrom, by: GeoSearchBy, options: GeoSearchOpts = GeoSearchOpts.default): F[List[(String, Double)]] =
+    RedisCtx[F].keyed(key, NEL("GEOSEARCH", geosearchCmd(key, from, by, options) ::: List("WITHDIST")))
+
+  def geosearchwithhash[F[_]: RedisCtx](key: String, from: GeoSearchFrom, by: GeoSearchBy, options: GeoSearchOpts = GeoSearchOpts.default): F[List[(String, Long)]] =
+    RedisCtx[F].keyed(key, NEL("GEOSEARCH", geosearchCmd(key, from, by, options) ::: List("WITHHASH")))
+
+  def geosearchwithdistcoord[F[_]: RedisCtx](key: String, from: GeoSearchFrom, by: GeoSearchBy, options: GeoSearchOpts = GeoSearchOpts.default): F[List[(String, Double, (Double, Double))]] =
+    RedisCtx[F].keyed(key, NEL("GEOSEARCH", geosearchCmd(key, from, by, options) ::: List("WITHCOORD", "WITHDIST")))
+
+  def geosearchwithdistcoordhash[F[_]: RedisCtx](key: String, from: GeoSearchFrom, by: GeoSearchBy, options: GeoSearchOpts = GeoSearchOpts.default): F[List[(String, Double, Long, (Double, Double))]] =
+    RedisCtx[F].keyed(key, NEL("GEOSEARCH", geosearchCmd(key, from, by, options) ::: List("WITHCOORD", "WITHDIST", "WITHHASH")))
+
+  private def geosearchCmd(key: String, from: GeoSearchFrom, by: GeoSearchBy, options: GeoSearchOpts): List[String] = {
+    val fromEnc = from match {
+      case GeoSearchFrom.Member(member)   => List("FROMMEMBER", member)
+      case GeoSearchFrom.LonLat(lon, lat) => List("FROMLONLAT", lon.encode, lat.encode)
+    }
+    val byEnc = by match {
+      case GeoSearchBy.Radius(radius, units)     => List("BYRADIUS", radius.encode, units.encode)
+      case GeoSearchBy.Box(width, height, units) => List("BYBOX", width.encode, height.encode, units.encode)
+    }
+    val sort = options.sort.map(_.encode).toList
+    val count = options.count.toList.flatMap {
+      case Count(count, true)  => List("COUNT", count.encode, "ANY")
+      case Count(count, false) => List("COUNT", count.encode)
+    }
+    key :: fromEnc ::: byEnc ::: sort ::: count
+  }
 
   private def toBV(s: String): ByteVector = ByteVector.encodeUtf8(s).fold(throw _, identity(_))
 }
