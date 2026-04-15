@@ -35,7 +35,7 @@ class RedisStreamSpec extends CatsEffectSuite {
     
   )
   // Not available on scala.js
-  val redisConnection = UnsafeResourceSuiteLocalDeferredFixture(
+  val redisConnection = ResourceSuiteLocalFixture(
       "redisconnection",
       resource
     )
@@ -46,17 +46,15 @@ class RedisStreamSpec extends CatsEffectSuite {
     val messages = fs2.Chunk.singleton(
       RedisStream.XAddMessage("foo", List("bar" -> "baz", "zoom" -> "zad"))
     )
-    redisConnection().flatMap{connection =>
 
-      val rStream = RedisStream.fromConnection[IO](connection)
-      rStream.append(messages) >>
-      rStream.read(Set("foo")).take(1).compile.lastOrError
-
-    }.map{ xrr => 
-      assertEquals(xrr.stream, "foo")
-      val i2 = xrr.records.flatMap(sr => sr.keyValues)
-      assertEquals(i2.toSet, messages.toList.flatMap(_.body).toSet)
-    }
+    val rStream = RedisStream.fromConnection[IO](redisConnection())
+    rStream.append(messages) >>
+    rStream.read(Set("foo")).take(1).compile.lastOrError
+      .map{ xrr => 
+        assertEquals(xrr.stream, "foo")
+        val i2 = xrr.records.flatMap(sr => sr.keyValues)
+        assertEquals(i2.toSet, messages.toList.flatMap(_.body).toSet)
+      }
   }
 
   test("consume messages from offset"){ //connection => 
@@ -65,17 +63,15 @@ class RedisStreamSpec extends CatsEffectSuite {
       RedisStream.XAddMessage("fee", List("2" -> "2")),
       RedisStream.XAddMessage("fee", List("3" -> "3")),
     )
-    redisConnection().flatMap{connection =>
-      
-      val rStream = RedisStream.fromConnection[IO](connection)
-      rStream.append(messages) >>
-      rStream
-        .read(Set("fee"), (_ => RedisCommands.StreamOffset.From("fee", "0-0")), Duration.Zero, 1L.some)
-        .take(3)
-        .compile
-        .toList
 
-    }.map{ resps => 
+    val rStream = RedisStream.fromConnection[IO](redisConnection())
+    rStream.append(messages) >>
+    rStream
+      .read(Set("fee"), (_ => RedisCommands.StreamOffset.From("fee", "0-0")), Duration.Zero, 1L.some)
+      .take(3)
+      .compile
+      .toList
+      .map{ resps => 
       val records = resps.flatMap(_.records).flatMap(_.keyValues.map(_._1))
       assertEquals(records, List("1", "2", "3"))
     }
@@ -90,21 +86,17 @@ class RedisStreamSpec extends CatsEffectSuite {
       RedisStream.XAddMessage("baz", List("5" -> "5")),
       RedisStream.XAddMessage("bar", List("6" -> "6")),
     )
-    redisConnection().flatMap{connection => 
       
-      val rStream = RedisStream.fromConnection[IO](connection)
-      rStream.append(messages) >>
-      rStream
-        .read(Set("baf", "baz", "bar"), stream => RedisCommands.StreamOffset.From(stream, "0"), Duration.Zero, 1L.some)
-        .take(6)
-        .compile
-        .toList
-
-    }.map{ resps => 
+    val rStream = RedisStream.fromConnection[IO](redisConnection())
+    rStream.append(messages) >>
+    rStream
+      .read(Set("baf", "baz", "bar"), stream => RedisCommands.StreamOffset.From(stream, "0"), Duration.Zero, 1L.some)
+      .take(6)
+      .compile
+      .toList
+      .map{ resps => 
       val records = resps.flatMap(_.records).flatMap(_.keyValues.map(_._1)).toSet
       assertEquals(records, Set("1", "2", "3", "4", "5", "6"))
     }
   }
 }
-
-

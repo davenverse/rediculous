@@ -129,9 +129,9 @@ object RedisTransaction {
           commands ++ 
           List(NonEmptyList.of(ByteVector.encodeAscii("EXEC").fold(throw _, identity(_))))
         )
-        RedisConnection.runRequestInternal(c)(Chunk.seq(all.toList), key)
+        RedisConnection.runRequestInternal(c)(Chunk.from(all.toList), key)
           .flatMap{_.last match {
-          case Some(Resp.Array(Some(a))) => f(Chunk.seq(a)).fold[TxResult[A]](e => TxResult.Error(e.toString), TxResult.Success(_)).pure[F]
+          case Some(Resp.Array(Some(a))) => f(Chunk.from(a)).fold[TxResult[A]](e => TxResult.Error(e.toString), TxResult.Success(_)).pure[F]
           case Some(Resp.Array(None)) => (TxResult.Aborted: TxResult[A]).pure[F]
           case other => ApplicativeError[F, Throwable].raiseError(RedisError.Generic(s"EXEC returned $other"))
         }}

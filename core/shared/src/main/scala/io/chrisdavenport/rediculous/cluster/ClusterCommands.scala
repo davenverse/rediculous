@@ -7,8 +7,6 @@ import cats.effect._
 import com.comcast.ip4s._
 import scodec.bits.ByteVector
 import RedisCtx.syntax.all._
-import cats.effect.std.Random
-import cats.MonadThrow
 
 object ClusterCommands {
 

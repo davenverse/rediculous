@@ -171,7 +171,6 @@ object RedisConnection{
 
   def direct[F[_]: Temporal: Network]: DirectConnectionBuilder[F] =
     new DirectConnectionBuilder(
-      Network[F],
       Defaults.host,
       Defaults.port,
       None,
@@ -187,7 +186,6 @@ object RedisConnection{
     direct(F, Network.forAsync(F))
 
   class DirectConnectionBuilder[F[_]: Temporal: Network] private[RedisConnection](
-    private val sg: SocketGroup[F],
     val host: Host,
     val port: Port,
     private val tlsContext: Option[TLSContext[F]],
@@ -199,7 +197,6 @@ object RedisConnection{
   ) { self =>
 
     private def copy(
-      sg: SocketGroup[F] = self.sg,
       host: Host = self.host,
       port: Port = self.port,
       tlsContext: Option[TLSContext[F]] = self.tlsContext,
@@ -209,7 +206,6 @@ object RedisConnection{
       commandTimeout: Duration = self.commandTimeout,
       redisRequestTimeout: Duration = self.redisRequestTimeout,
     ): DirectConnectionBuilder[F] = new DirectConnectionBuilder(
-      sg,
       host,
       port,
       tlsContext,
@@ -225,7 +221,8 @@ object RedisConnection{
     def withTLSContext(tlsContext: TLSContext[F]) = copy(tlsContext = tlsContext.some)
     def withoutTLSContext = copy(tlsContext = None)
     def withTLSParameters(tlsParameters: TLSParameters) = copy(tlsParameters = tlsParameters)
-    def withSocketGroup(sg: SocketGroup[F]) = copy(sg = sg)
+    @deprecated("0.6.0", "SocketGroup is now provided by Network")
+    def withSocketGroup(sg: SocketGroup[F]) = this
     def withAuth(username: Option[String], password: String) = copy(auth = Some((username, password)))
     def withoutAuth = copy(auth = None)
     def withTLS = copy(useTLS = true)
@@ -237,7 +234,7 @@ object RedisConnection{
 
     def build: Resource[F,RedisConnection[F]] =
       for {
-        socket <- sg.client(SocketAddress(host,port), Nil)
+        socket <- Network[F].connect(SocketAddress(host,port), Nil)
         tlsContextOptWithDefault <-
           tlsContext
             .fold(Network[F].tlsContext.systemResource.attempt.map(_.toOption))(
@@ -256,7 +253,6 @@ object RedisConnection{
 
   def pool[F[_]: Temporal: Network]: PooledConnectionBuilder[F] =
     new PooledConnectionBuilder(
-      Network[F],
       Defaults.host,
       Defaults.port,
       None,
@@ -275,7 +271,6 @@ object RedisConnection{
     pool(F, Network.forAsync(F))
 
   class PooledConnectionBuilder[F[_]: Temporal: Network] private[RedisConnection] (
-    private val sg: SocketGroup[F],
     val host: Host,
     val port: Port,
     private val tlsContext: Option[TLSContext[F]],
@@ -291,7 +286,6 @@ object RedisConnection{
   ) { self =>
 
     private def copy(
-      sg: SocketGroup[F] = self.sg,
       host: Host = self.host,
       port: Port = self.port,
       tlsContext: Option[TLSContext[F]] = self.tlsContext,
@@ -305,7 +299,6 @@ object RedisConnection{
       commandTimeout: Duration = self.commandTimeout,
       redisRequestTimeout: Duration = self.redisRequestTimeout
     ): PooledConnectionBuilder[F] = new PooledConnectionBuilder(
-      sg,
       host,
       port,
       tlsContext,
@@ -324,7 +317,8 @@ object RedisConnection{
     def withTLSContext(tlsContext: TLSContext[F]) = copy(tlsContext = tlsContext.some)
     def withoutTLSContext = copy(tlsContext = None)
     def withTLSParameters(tlsParameters: TLSParameters) = copy(tlsParameters = tlsParameters)
-    def withSocketGroup(sg: SocketGroup[F]) = copy(sg = sg)
+    @deprecated("0.6.0", "SocketGroup is now provided by Network")
+    def withSocketGroup(sg: SocketGroup[F]) = this
     def withAuth(username: Option[String], password: String) = copy(auth = Some((username, password)))
     def withoutAuth = copy(auth = None)
     def withTLS = copy(useTLS = true)
@@ -346,7 +340,7 @@ object RedisConnection{
             _.some.pure[Resource[F, *]]
           )
       kp <- KeyPool.Builder[F, Unit, Socket[F]](
-        {(_: Unit) => sg.client(SocketAddress(host,port), Nil)
+        {(_: Unit) => Network[F].connect(SocketAddress(host,port), Nil)
           .flatMap(elevateSocket(_, tlsContextOptWithDefault, tlsParameters, useTLS))
           .evalTap(socket =>
             auth match {
@@ -369,7 +363,6 @@ object RedisConnection{
 
   def queued[F[_]: Temporal: Network]: QueuedConnectionBuilder[F] =
     new QueuedConnectionBuilder(
-      Network[F],
       Defaults.host,
       Defaults.port,
       None,
@@ -391,7 +384,6 @@ object RedisConnection{
     queued(F, Network.forAsync(F))
 
   class QueuedConnectionBuilder[F[_]: Temporal: Network] private[RedisConnection](
-    private val sg: SocketGroup[F],
     val host: Host,
     val port: Port,
     private val tlsContext: Option[TLSContext[F]],
@@ -410,7 +402,6 @@ object RedisConnection{
   ) { self =>
 
     private def copy(
-      sg: SocketGroup[F] = self.sg,
       host: Host = self.host,
       port: Port = self.port,
       tlsContext: Option[TLSContext[F]] = self.tlsContext,
@@ -427,7 +418,6 @@ object RedisConnection{
       commandTimeout: Duration = self.commandTimeout,
       redisRequestTimeout: Duration = self.redisRequestTimeout,
     ): QueuedConnectionBuilder[F] = new QueuedConnectionBuilder(
-      sg,
       host,
       port,
       tlsContext,
@@ -449,7 +439,8 @@ object RedisConnection{
     def withTLSContext(tlsContext: TLSContext[F]) = copy(tlsContext = tlsContext.some)
     def withoutTLSContext = copy(tlsContext = None)
     def withTLSParameters(tlsParameters: TLSParameters) = copy(tlsParameters = tlsParameters)
-    def withSocketGroup(sg: SocketGroup[F]) = copy(sg = sg)
+    @deprecated("0.6.0", "SocketGroup is now provided by Network")
+    def withSocketGroup(sg: SocketGroup[F]) = this
 
     def withMaxQueued(maxQueued: Int) = copy(maxQueued = maxQueued)
     def withWorkers(workers: Int) = copy(workers = workers)
@@ -478,7 +469,7 @@ object RedisConnection{
               _.some.pure[Resource[F, *]]
             )
         keypool <- KeyPool.Builder.apply[F, Unit, Socket[F]](
-          {(_: Unit) => sg.client(SocketAddress(host,port), Nil)
+          {(_: Unit) => Network[F].connect(SocketAddress(host,port), Nil)
             .flatMap(elevateSocket(_, tlsContextOptWithDefault, tlsParameters, useTLS))
             .evalTap(socket =>
               auth match {
@@ -534,7 +525,6 @@ object RedisConnection{
 
   def cluster[F[_]: Async: Network]: ClusterConnectionBuilder[F] =
     new ClusterConnectionBuilder(
-      Network[F],
       Defaults.host,
       Defaults.port,
       None,
@@ -560,7 +550,6 @@ object RedisConnection{
     cluster(F, Network.forAsync(F))
 
   class ClusterConnectionBuilder[F[_]: Async: Network] private[RedisConnection] (
-    private val sg: SocketGroup[F],
     val host: Host,
     val port: Port,
     private val tlsContext: Option[TLSContext[F]],
@@ -583,7 +572,6 @@ object RedisConnection{
   ) { self =>
 
     private def copy(
-      sg: SocketGroup[F] = self.sg,
       host: Host = self.host,
       port: Port = self.port,
       tlsContext: Option[TLSContext[F]] = self.tlsContext,
@@ -602,7 +590,6 @@ object RedisConnection{
       commandTimeout: Duration = self.commandTimeout,
       redisRequestTimeout: Duration = self.redisRequestTimeout,
     ): ClusterConnectionBuilder[F] = new ClusterConnectionBuilder(
-      sg,
       host,
       port,
       tlsContext,
@@ -627,7 +614,8 @@ object RedisConnection{
     def withTLSContext(tlsContext: TLSContext[F]) = copy(tlsContext = tlsContext.some)
     def withoutTLSContext = copy(tlsContext = None)
     def withTLSParameters(tlsParameters: TLSParameters) = copy(tlsParameters = tlsParameters)
-    def withSocketGroup(sg: SocketGroup[F]) = copy(sg = sg)
+    @deprecated("0.6.0", "SocketGroup is now provided by Network")
+    def withSocketGroup(sg: SocketGroup[F]) = this
 
     def withAuth(username: Option[String], password: String) = copy(auth = Some((username, password)))
     def withoutAuth = copy(auth = None)
@@ -663,7 +651,7 @@ object RedisConnection{
           {(t: (Host, Port)) =>
             val host = t._1
             val port = t._2
-            sg.client(SocketAddress(host, port), Nil)
+            Network[F].connect(SocketAddress(host, port), Nil)
               .flatMap(elevateSocket(_, tlsContextOptWithDefault, tlsParameters, useTLS))
               .evalTap(socket =>
                 auth match {

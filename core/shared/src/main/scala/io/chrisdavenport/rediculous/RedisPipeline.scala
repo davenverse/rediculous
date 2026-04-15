@@ -61,10 +61,10 @@ object RedisPipeline {
       Redis(Kleisli{(c: RedisConnection[F]) => 
         val ((_, commandsR, key), RedisTransaction.Queued(f)) = tx.value.value.run((0, List.empty, None)).value
         val commands = commandsR.reverse.toNel
-        commands.traverse(nelCommands => RedisConnection.runRequestInternal(c)(fs2.Chunk.seq(nelCommands.toList), key) // We Have to Actually Send A Command
+        commands.traverse(nelCommands => RedisConnection.runRequestInternal(c)(fs2.Chunk.from(nelCommands.toList), key) // We Have to Actually Send A Command
           .flatMap{nel => 
             val l  = nel.toList
-            val c = fs2.Chunk.seq(l)
+            val c = fs2.Chunk.from(l)
             val resp = f(c)
             RedisConnection.closeReturn[F, A](resp)}
         ).flatMap{

@@ -1,21 +1,15 @@
 package io.chrisdavenport.rediculous
 
-import scala.collection.mutable
 import cats.data.NonEmptyList
 import cats.implicits._
-import scala.util.control.NonFatal
 import java.nio.charset.StandardCharsets
 import java.nio.charset.Charset
-import scodec.bits.ByteVector
 
 import scodec.Codec
 import scodec.bits.{BitVector, ByteVector}
 import scodec.codecs._
-import scodec.Attempt.Failure
-import scodec.Attempt.Successful
 import scodec.Attempt
 import scodec.Err
-import fs2.Chunk
 
 sealed trait Resp extends Product with Serializable
 

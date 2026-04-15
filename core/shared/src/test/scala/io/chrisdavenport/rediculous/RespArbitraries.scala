@@ -1,10 +1,8 @@
 package io.chrisdavenport.rediculous
 
-import cats.syntax.all._
 import org.scalacheck._
 import org.scalacheck.{Gen => G}
 import scodec.bits._
-import org.scalacheck.cats.implicits._
 
 object RespArbitraries {
 
@@ -34,11 +32,11 @@ object RespArbitraries {
     Gen.posNum[Long].map(l => Resp.Integer(l))
   )
 
-  val nonList = Gen.oneOf(
-    arbitrarySimpleString.arbitrary.widen[Resp],
-    arbitraryError.arbitrary.widen[Resp],
-    aribitraryBulkString.arbitrary.widen[Resp],
-    arbInteger.arbitrary.widen[Resp],
+  val nonList = Gen.oneOf[Resp](
+    arbitrarySimpleString.arbitrary,
+    arbitraryError.arbitrary,
+    aribitraryBulkString.arbitrary,
+    arbInteger.arbitrary,
   )
 
   val listGen = Gen.recursive[Resp.Array](arrayGen => 
@@ -53,11 +51,11 @@ object RespArbitraries {
   implicit lazy val resp: Arbitrary[Resp] = Arbitrary(
     Gen.lzy(
       Gen.oneOf(
-        arbitrarySimpleString.arbitrary.widen[Resp],
-        arbitraryError.arbitrary.widen[Resp],
-        aribitraryBulkString.arbitrary.widen[Resp],
-        arbInteger.arbitrary.widen[Resp],
-        listGen.widen[Resp]
+        arbitrarySimpleString.arbitrary,
+        arbitraryError.arbitrary,
+        aribitraryBulkString.arbitrary,
+        arbInteger.arbitrary,
+        listGen
       )
     )
   )
