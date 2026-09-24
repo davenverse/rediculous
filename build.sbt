@@ -14,6 +14,11 @@ ThisBuild / tlCiReleaseBranches := Seq("main")
 
 ThisBuild / githubWorkflowBuildPreamble ++= nativeBrewInstallWorkflowSteps.value
 
+// sbt-typelevel 0.8.x defaults githubWorkflowOSes to ubuntu-22.04. Homebrew now
+// ships openssl built against glibc >= 2.38, which will not link on 22.04
+// (glibc 2.35), breaking the Scala Native build.
+ThisBuild / githubWorkflowOSes := Seq("ubuntu-latest")
+
 
 val catsV = "2.11.0"
 val catsEffectV = "3.5.4"
@@ -22,8 +27,8 @@ val fs2V = "3.10.2"
 
 val munitCatsEffectV = "2.0.0-M4"
 
-ThisBuild / crossScalaVersions := Seq("2.12.19","2.13.14", "3.4.2")
-ThisBuild / scalaVersion := "2.13.14"
+ThisBuild / crossScalaVersions := Seq("2.12.19","2.13.18", "3.4.2")
+ThisBuild / scalaVersion := "2.13.18"
 ThisBuild / versionScheme := Some("early-semver")
 
 // Projects
