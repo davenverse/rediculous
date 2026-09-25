@@ -98,6 +98,7 @@
 
   <ul class="nav-list">
     <li class="level1 nav-leaf"><a href="#quick-start">Quick Start</a></li>
+    <li class="level1 nav-leaf"><a href="#transport-security">Transport security</a></li>
   </ul>
 
   <p class="footer"></p>
@@ -175,6 +176,37 @@
     }.</span><span class="identifier">as</span><span>(</span><span class="type-name">ExitCode</span><span>.</span><span class="type-name">Success</span><span>)
   }
 }</span></code></pre>
+        
+        <h2 id="transport-security" class="section"><a class="anchor-link left" href="#transport-security"><i class="icofont-laika link">&#xef71;</i></a>Transport security</h2>
+        <p>TLS is <strong>not</strong> enabled by default. Redis itself listens in the clear by
+        default and most clients follow suit, so <code>rediculous</code> does too — but that
+        choice is worth making deliberately rather than inheriting.</p>
+        <p>On a plaintext connection everything is readable by anything on the path,
+        including the <code>AUTH</code> exchange. Credentials are sent as an ordinary RESP bulk
+        string, and the connection pool authenticates <strong>every</strong> socket it opens, not
+        just the first — so the password crosses the network repeatedly for the life
+        of the application.</p>
+        <p>Enable TLS with <code>.withTLS</code>:</p>
+        <pre class="keep-together pdf epub"><code class="nohighlight"><span class="type-name">RedisConnection</span><span>
+  .</span><span class="identifier">queued</span><span>[</span><span class="type-name">IO</span><span>]
+  .</span><span class="identifier">withHost</span><span>(</span><span class="string-literal">host&quot;redis.example&quot;</span><span>)
+  .</span><span class="identifier">withPort</span><span>(</span><span class="string-literal">port&quot;6379&quot;</span><span>)
+  .</span><span class="identifier">withAuth</span><span>(</span><span class="type-name">None</span><span>, </span><span class="string-literal">&quot;correct horse battery staple&quot;</span><span>)
+  .</span><span class="identifier">withTLS</span><span>
+  .</span><span class="identifier">build</span></code></pre>
+        <p><code>.withTLSContext</code> supplies your own <code>TLSContext</code> — for a private CA, say — and
+        <code>.withTLSParameters</code> tunes the handshake. Without a context, the system trust
+        store is used.</p>
+        <p>Use TLS whenever the connection leaves the host. A local Unix-socket or
+        loopback connection to a Redis on the same machine is a reasonable exception;
+        anything crossing a network is not, regardless of whether that network is
+        described as private.</p>
+        <p>Two notes for cluster connections. Slot redirects (<code>MOVED</code> and <code>ASK</code>) name the
+        node to retry against, and those names come from the server; <code>rediculous</code>
+        follows a redirect only to a node the cluster topology already lists, so a
+        redirect cannot send your credentials to an arbitrary host. That check does
+        nothing for the credentials already in flight on a plaintext link, which is
+        the stronger reason to enable TLS.</p>
 
         
 <hr class="footer-rule"/>
