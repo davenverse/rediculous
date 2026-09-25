@@ -735,30 +735,44 @@ object RedisConnection{
                             ref match {
                               case Right(e@Resp.Error(s)) if (s.startsWith("MOVED") && retries <= 5)  => // MOVED 1234-2020 127.0.0.1:6381
                                 refreshTopology.attempt.void >>
-                                // Offer To Have it reprocessed. 
-                                // If the queue is full return the error to the user
-                                cluster.queue.tryOffer(Chunk.singleton((toSet, key, extractServer(s), retries + 1, initialCommand)))
-                                  .ifM(
-                                    Applicative[F].unit,
+                                refTopology.get.flatMap{ case (topo, _) =>
+                                  val parsed = extractServer(s)
+                                  // The topology was just refreshed, so a node
+                                  // still absent from it is not one we should
+                                  // open an authenticated connection to.
+                                  if (parsed.exists(target => !redirectIsKnown(topo, target)))
                                     toSet(Either.right(e)).void
-                                  )
+                                  else
+                                    // Offer To Have it reprocessed.
+                                    // If the queue is full return the error to the user
+                                    cluster.queue.tryOffer(Chunk.singleton((toSet, key, parsed, retries + 1, initialCommand)))
+                                      .ifM(
+                                        Applicative[F].unit,
+                                        toSet(Either.right(e)).void
+                                      )
+                                }
                               case Right(e@Resp.Error(s)) if (s.startsWith("ASK") && retries <= 5) => // ASK 1234-2020 127.0.0.1:6381
-                                val serverRedirect = extractServer(s)
-                                serverRedirect match {
-                                  case s@Some(_) => // This is a Special One Off, Requires a Redirect
-                                    // Deferred[F, Either[Throwable, Resp]].flatMap{d => // No One Cares About this Callback
-                                      val asking = ({(_: Either[Throwable, Resp]) => Applicative[F].unit}, key, s, 6, Resp.renderRequest(NonEmptyList.of(ByteVector.encodeAscii("ASKING").fold(throw _, identity(_))))) // Never Repeat Asking
-                                      val repeat = (toSet, key, s, retries + 1, initialCommand)
-                                      val chunk = Chunk(asking, repeat)
-                                      cluster.queue.tryOffer(chunk) // Offer To Have it reprocessed.
-                                        //If the queue is full return the error to the user
-                                        .ifM(
-                                          Applicative[F].unit,
-                                          toSet(Either.right(e))
-                                        )
-                                    // }
-                                  case None => 
-                                    toSet(Either.right(e))
+                                // Refresh first so a migration destination that
+                                // has only just joined is recognised. The
+                                // refresh is throttled by cacheTopologySeconds.
+                                refreshTopology.attempt.void >>
+                                refTopology.get.flatMap{ case (topo, _) =>
+                                  extractServer(s).filter(redirectIsKnown(topo, _)) match {
+                                    case redirect@Some(_) => // This is a Special One Off, Requires a Redirect
+                                      // Deferred[F, Either[Throwable, Resp]].flatMap{d => // No One Cares About this Callback
+                                        val asking = ({(_: Either[Throwable, Resp]) => Applicative[F].unit}, key, redirect, 6, Resp.renderRequest(NonEmptyList.of(ByteVector.encodeAscii("ASKING").fold(throw _, identity(_))))) // Never Repeat Asking
+                                        val repeat = (toSet, key, redirect, retries + 1, initialCommand)
+                                        val chunk = Chunk(asking, repeat)
+                                        cluster.queue.tryOffer(chunk) // Offer To Have it reprocessed.
+                                          //If the queue is full return the error to the user
+                                          .ifM(
+                                            Applicative[F].unit,
+                                            toSet(Either.right(e))
+                                          )
+                                      // }
+                                    case None =>
+                                      toSet(Either.right(e))
+                                  }
                                 }
                               case Right(otherwise) =>
                                 toSet(Either.right(otherwise))
@@ -784,6 +798,29 @@ object RedisConnection{
 
   private def elevateSocket[F[_]](socket: Socket[F], tlsContext: Option[TLSContext[F]], tlsParameters: TLSParameters, useTLS: Boolean): Resource[F, Socket[F]] =
     tlsContext.fold(Resource.pure[F, Socket[F]](socket))(c => if (!useTLS) Resource.pure[F, Socket[F]](socket) else c.clientBuilder(socket).withParameters(tlsParameters).build)
+
+  /**
+   * Every node the cluster has told us about: the master and replicas of each
+   * slot range.
+   */
+  private[rediculous] def clusterMembers(slots: ClusterSlots): Set[(Host, Port)] =
+    slots.l.flatMap(_.replicas).map(server => (server.host, server.port)).toSet
+
+  /**
+   * Whether a MOVED or ASK redirect may be followed.
+   *
+   * The host and port in a redirect come from the server, and following one
+   * opens a new connection -- on which the pool sends AUTH. A node that is
+   * compromised, or a redirect injected into a plaintext connection, can
+   * therefore point the client at an arbitrary host and collect the
+   * credentials configured for the cluster.
+   *
+   * A redirect naming a node the topology does not list is refused. Callers
+   * refresh the topology first, so a node added by a resharding operation is
+   * known by the time this is consulted.
+   */
+  private[rediculous] def redirectIsKnown(slots: ClusterSlots, target: (Host, Port)): Boolean =
+    clusterMembers(slots).contains(target)
 
   // ASK 1234-2020 127.0.0.1:6381
   // MOVED 1234-2020 127.0.0.1:6381
