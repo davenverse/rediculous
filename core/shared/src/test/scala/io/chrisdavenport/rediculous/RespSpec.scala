@@ -210,6 +210,37 @@ class RespSpec extends munit.ScalaCheckSuite {
     }
   }
 
-  
-  
+  test("A non-numeric integer reply fails the decode rather than throwing") {
+    // ":" introduces an Integer reply, whose payload here is not a number.
+    val bits = ByteVector.view(":not-a-number\r\n".getBytes()).bits
+    Resp.CodecUtils.codec.decode(bits) match {
+      case Attempt.Failure(_) => ()
+      case Successful(value) => fail(s"Expected a decode failure, got $value")
+    }
+  }
+
+  test("A non-numeric bulk string length fails the decode rather than throwing") {
+    // "$" introduces a BulkString, whose length prefix here is not a number.
+    val bits = ByteVector.view("$bogus\r\nabc\r\n".getBytes()).bits
+    Resp.CodecUtils.codec.decode(bits) match {
+      case Attempt.Failure(_) => ()
+      case Successful(value) => fail(s"Expected a decode failure, got $value")
+    }
+  }
+
+  test("An unrecognised Redis type decodes to Left rather than throwing") {
+    val resp = Resp.SimpleString("some-type-from-a-newer-redis")
+    assertEquals(
+      RedisResult[RedisProtocol.RedisType].decode(resp),
+      Left(resp)
+    )
+  }
+
+  test("Known Redis types still decode") {
+    assertEquals(
+      RedisResult[RedisProtocol.RedisType].decode(Resp.SimpleString("hash")),
+      Right(RedisProtocol.RedisType.Hash)
+    )
+  }
+
 }

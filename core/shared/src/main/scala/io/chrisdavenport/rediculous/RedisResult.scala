@@ -56,16 +56,18 @@ object RedisResult extends RedisResultLowPriority{
 
   implicit val redisType: RedisResult[RedisProtocol.RedisType] = new RedisResult[RedisProtocol.RedisType] {
     def decode(resp: Resp): Either[Resp,RedisProtocol.RedisType] = resp match {
-      case Resp.SimpleString(value) => Either.right(value match {
-        case "none" => RedisProtocol.RedisType.None
-        case "string" => RedisProtocol.RedisType.String
-        case "hash" => RedisProtocol.RedisType.Hash
-        case "list" => RedisProtocol.RedisType.List
-        case "set" => RedisProtocol.RedisType.Set
-        case "stream" => RedisProtocol.RedisType.Stream
-        case "zset" => RedisProtocol.RedisType.ZSet
-        case _ => throw RedisError.Generic(s"Rediculous: Unhandled red type: $value")
-      })
+      case Resp.SimpleString(value) => value match {
+        case "none" => Either.right(RedisProtocol.RedisType.None)
+        case "string" => Either.right(RedisProtocol.RedisType.String)
+        case "hash" => Either.right(RedisProtocol.RedisType.Hash)
+        case "list" => Either.right(RedisProtocol.RedisType.List)
+        case "set" => Either.right(RedisProtocol.RedisType.Set)
+        case "stream" => Either.right(RedisProtocol.RedisType.Stream)
+        case "zset" => Either.right(RedisProtocol.RedisType.ZSet)
+        // An unrecognised type from a newer server is reported as an
+        // undecodable Resp, like every other instance here, rather than thrown.
+        case _ => Left(resp)
+      }
       case r => Left(r)
     }
   }

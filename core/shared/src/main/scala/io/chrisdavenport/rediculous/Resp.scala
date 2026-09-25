@@ -74,8 +74,22 @@ object Resp {
   }
 
   object CodecUtils {
-    private val asciiInt: Codec[scala.Int] = ascii.xmap(_.toInt, _.toString())
-    private val asciiLong: Codec[scala.Long] = ascii.xmap(_.toLong, _.toString())
+    // A malformed length or integer from the wire must fail the decode rather
+    // than throw NumberFormatException out of the codec.
+    private val asciiInt: Codec[scala.Int] = ascii.exmap(
+      s => Attempt.fromOption(
+        Either.catchOnly[NumberFormatException](s.toInt).toOption,
+        Err(s"Expected an integer, got: $s")
+      ),
+      i => Attempt.successful(i.toString())
+    )
+    private val asciiLong: Codec[scala.Long] = ascii.exmap(
+      s => Attempt.fromOption(
+        Either.catchOnly[NumberFormatException](s.toLong).toOption,
+        Err(s"Expected a long, got: $s")
+      ),
+      l => Attempt.successful(l.toString())
+    )
     private val crlf = BitVector('\r', '\n')
     private val delimInt: Codec[scala.Int] = crlfTerm(asciiInt).withContext("delimInt")
     private val delimLong: Codec[Long] = crlfTerm(asciiLong)
