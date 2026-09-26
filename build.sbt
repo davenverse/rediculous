@@ -54,7 +54,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.typelevel"               %%% "keypool"                    % "0.4.11",
       
 
-      "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.3.2" % Test,
+      "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.5.0" % Test,
       "org.typelevel"               %%% "munit-cats-effect"          % munitCatsEffectV         % Test,
       "org.scalameta"               %%% "munit-scalacheck"            % "1.3.1" % Test,
     ),
@@ -66,7 +66,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   )
   .platformsSettings(JVMPlatform, JSPlatform)(
     libraryDependencies ++= Seq(
-      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.11" % Test,
+      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.14" % Test,
     )
   )
   .nativeEnablePlugins(ScalaNativeBrewedConfigPlugin)
