@@ -2,7 +2,7 @@ package io.chrisdavenport.rediculous
 
 import cats.effect._
 import fs2.{Chunk, Pipe}
-import com.comcast.ip4s.{Host, Port,IpAddress, SocketAddress}
+import com.comcast.ip4s.{GenSocketAddress, Host, Port,IpAddress, SocketAddress}
 import fs2.io.net.{Socket, SocketOption, SocketGroup}
 
 class RedisConnectionSpec extends RediculousCrossSuite {
@@ -22,8 +22,18 @@ class RedisConnectionSpec extends RediculousCrossSuite {
       def isOpen: IO[Boolean] = ???
       
       def remoteAddress: IO[SocketAddress[IpAddress]] = ???
-      
+
       def localAddress: IO[SocketAddress[IpAddress]] = ???
+
+      def address: GenSocketAddress = ???
+
+      def peerAddress: GenSocketAddress = ???
+
+      def supportedOptions: IO[Set[SocketOption.Key[_]]] = ???
+
+      def getOption[A](key: SocketOption.Key[A]): IO[Option[A]] = ???
+
+      def setOption[A](key: SocketOption.Key[A], value: A): IO[Unit] = ???
 
       def write(bytes: Chunk[Byte]): IO[Unit] = IO.unit
 

@@ -20,14 +20,14 @@ ThisBuild / githubWorkflowBuildPreamble ++= nativeBrewInstallWorkflowSteps.value
 ThisBuild / githubWorkflowOSes := Seq("ubuntu-latest")
 
 
-val catsV = "2.11.0"
-val catsEffectV = "3.5.4"
-val fs2V = "3.10.2"
+val catsV = "2.13.0"
+val catsEffectV = "3.7.1"
+val fs2V = "3.14.0"
 
 
-val munitCatsEffectV = "2.0.0-M4"
+val munitCatsEffectV = "2.2.1"
 
-ThisBuild / crossScalaVersions := Seq("2.12.19","2.13.18", "3.4.2")
+ThisBuild / crossScalaVersions := Seq("2.13.18", "3.3.8")
 ThisBuild / scalaVersion := "2.13.18"
 ThisBuild / versionScheme := Some("early-semver")
 
@@ -51,14 +51,14 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "co.fs2"                      %%% "fs2-io"                     % fs2V,
       "co.fs2"                      %%% "fs2-scodec"                 % fs2V,
 
-      "org.typelevel"               %%% "keypool"                    % "0.4.9",
+      "org.typelevel"               %%% "keypool"                    % "0.4.11",
       
 
-      "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.3.2" % Test,
+      "io.chrisdavenport"           %%% "cats-scalacheck"            % "0.5.0" % Test,
       "org.typelevel"               %%% "munit-cats-effect"          % munitCatsEffectV         % Test,
-      "org.scalameta"               %%% "munit-scalacheck"            % "1.0.0-M10" % Test,
+      "org.scalameta"               %%% "munit-scalacheck"            % "1.3.1" % Test,
     ),
-    libraryDependencies += "org.scodec" %%% "scodec-core" % (if (scalaVersion.value.startsWith("2.")) "1.11.10" else "2.2.2"),
+    libraryDependencies += "org.scodec" %%% "scodec-core" % (if (scalaVersion.value.startsWith("2.")) "1.11.11" else "2.3.3"),
   ).jsSettings(
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)}
   ).jvmSettings(
@@ -66,13 +66,12 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   )
   .platformsSettings(JVMPlatform, JSPlatform)(
     libraryDependencies ++= Seq(
-      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.11" % Test,
+      "io.chrisdavenport"           %%% "whale-tail-manager"         % "0.0.14" % Test,
     )
   )
   .nativeEnablePlugins(ScalaNativeBrewedConfigPlugin)
   .platformsSettings(NativePlatform)(
     libraryDependencies ++= Seq(
-      "com.armanbilge" %%% "epollcat" % "0.1.6" % Test
     ),
     Test / nativeBrewFormulas ++= Set("s2n"),
     Test / envVars ++= Map("S2N_DONT_MLOCK" -> "1")
@@ -89,7 +88,7 @@ lazy val examples = crossProject(JVMPlatform, JSPlatform)
     run / fork := true,
   ).jsSettings(
     libraryDependencies ++= Seq(
-      "io.github.cquiroz" %%% "scala-java-time" % "2.6.0"
+      "io.github.cquiroz" %%% "scala-java-time" % "2.7.0"
     ),
     Compile / mainClass := Some("BasicExample"),
     scalaJSUseMainModuleInitializer := true,

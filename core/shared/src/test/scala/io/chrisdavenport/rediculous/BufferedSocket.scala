@@ -2,9 +2,9 @@ package io.chrisdavenport.rediculous.util
 
 import cats.syntax.all._
 import fs2._
-import fs2.io.net.Socket
+import fs2.io.net.{Socket, SocketOption}
 import cats.effect._
-import com.comcast.ip4s.{IpAddress, SocketAddress}
+import com.comcast.ip4s.{GenSocketAddress, IpAddress, SocketAddress}
 
 private[rediculous] trait BufferedSocket[F[_]] extends Socket[F]{
   def buffer(bytes: Chunk[Byte]): F[Unit]
@@ -46,9 +46,19 @@ private[rediculous] object BufferedSocket{
     def isOpen: F[Boolean] = socket.isOpen
     
     def remoteAddress: F[SocketAddress[IpAddress]] = socket.remoteAddress
-    
+
     def localAddress: F[SocketAddress[IpAddress]] = socket.localAddress
-    
+
+    def address: GenSocketAddress = socket.address
+
+    def peerAddress: GenSocketAddress = socket.peerAddress
+
+    def supportedOptions: F[Set[SocketOption.Key[_]]] = socket.supportedOptions
+
+    def getOption[A](key: SocketOption.Key[A]): F[Option[A]] = socket.getOption(key)
+
+    def setOption[A](key: SocketOption.Key[A], value: A): F[Unit] = socket.setOption(key, value)
+
     def write(bytes: Chunk[Byte]): F[Unit] = socket.write(bytes)
     
     def writes: Pipe[F,Byte,Nothing] = socket.writes
